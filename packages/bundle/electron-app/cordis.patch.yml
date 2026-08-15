@@ -1,0 +1,31 @@
+# The dsh-electron-app bundle patch: the desktop surface over dsh-web-app.
+# The HTTP carrier family is disabled; the IPC carrier and the Electron
+# directory picker replace them. web-runtime stays mounted because the
+# connection row injects webRuntime, but prints no URL line and registers no
+# model-visible web-surface context — the desktop shell has no canonical URL.
+#
+# A patch replaces the targeted row's whole `config`, so the web-runtime row
+# below restates every key it keeps: dropping `trustedHosts` leaves the
+# plugin's schema default, and with no webServer row mounted it provides the
+# empty trust snapshot regardless.
+
+- id: webserver
+  disabled: true
+
+- id: client-hmr
+  disabled: true
+
+- id: web-runtime
+  config:
+    printUrl: false
+    surfaceContext: false
+
+- id: directory-picker
+  disabled: true
+
+- insert:
+    - id: directory-picker-electron
+      name: '@deepseek-ai/dsh-host-directory-picker-electron'
+
+    - id: connection-electron
+      name: '@deepseek-ai/dsh-host-connection-electron'

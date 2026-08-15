@@ -276,11 +276,21 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
       // live on every long-lived surface. A silent skip would break the
       // documented hot-reload contract. HMR injects the timer service, which a
       // bare custom profile may not mount either.
-      if (ctx.get('hmr') === undefined) {
+      let liveReload = ctx.get('hmr') !== undefined
+      if (!liveReload && ctx.loader.internal !== undefined) {
         if (ctx.get('timer') === undefined) {
           await ctx.loader.create({ name: '@deepseek-ai/cordis-plugin-timer' })
         }
         await ctx.loader.create({ name: '@deepseek-ai/cordis-plugin-hmr', config: { root: [] } })
+        liveReload = true
+      }
+      if (!liveReload) {
+        // The vendored HMR service needs the internal ESM loader, which
+        // Electron's embedded Node does not expose. Those environments boot
+        // without live patch layers and say so, instead of failing startup:
+        // the desktop shell applies cordis.patch.yml edits on restart.
+        ctx.logger.warn('dsh: user patch-layer watching unavailable (no internal ESM loader); restart to apply cordis.patch.yml edits')
+        return { ctx, shutdown }
       }
       await watchUserPatches(ctx, {
         binName: NAME,
