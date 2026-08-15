@@ -37,7 +37,7 @@ async function bench() {
 
 describe('ui-layout client apply', () => {
   it('declares its service dependencies', () => {
-    expect(inject).toEqual(['slots', 'theme'])
+    expect(inject).toEqual(['slots', 'theme', 'locale'])
   })
 
   it('provides ctx.layout and registers AppFrame into root with the three child declarations', async () => {
@@ -47,6 +47,10 @@ describe('ui-layout client apply', () => {
     expect(ctx.get('layout')).toBeInstanceOf(LayoutController)
     // The one register() call occupied 'root'…
     expect(slots.entries('root')).toHaveLength(1)
+    // …declared its caption copy under the locale service (both seats occupied)…
+    const locale = ctx.get('locale') as LocaleRuntime
+    expect(() => locale.register('layout', 'zh', {})).toThrow('already has locale')
+    expect(() => locale.register('layout', 'en', {})).toThrow('already has locale')
     // …and declared the three children in the ledger.
     expect(slots.spec('sidebar')).toEqual({ kind: 'single', scope: 'root' })
     expect(slots.spec('conversation')).toEqual({ kind: 'single', scope: 'session-maybe' })

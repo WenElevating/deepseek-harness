@@ -15,7 +15,7 @@ pnpm run dsh:electron                      # builds the app, then `electron .`
 
 ## `--dsh-smoke`
 
-`electron . --dsh-smoke` 用机器可校验的断言替代交互式生命周期：渲染进程必须看到注入的 `window.__DSH_BOOT__` 图和 preload 的 `window.__DSH_IPC__` 桥，一个请求必须穿过 `dsh:fetch` IPC 通道，引导的 profile 必须未挂载 `webServer` 服务。进程为每个断言输出一行 `PASS`/`FAIL`，仅在全部通过时以 0 退出；对话框被抑制，自动化不会卡在模态框上。
+`electron . --dsh-smoke` 用机器可校验的断言替代交互式生命周期：渲染进程必须看到注入的 `window.__DSH_BOOT__` 图、preload 的 `window.__DSH_IPC__` 桥与 `window.__DSH_WINDOW__` 标题栏桥，一个请求必须穿过 `dsh:fetch` IPC 通道，引导的 profile 必须未挂载 `webServer` 服务。进程为每个断言输出一行 `PASS`/`FAIL`，仅在全部通过时以 0 退出；对话框被抑制，自动化不会卡在模态框上。
 
 两个无 key 测试套件与之互补：`apps/electron/tests/electron-profile.snapshot.ts`（`pnpm run test:snapshot`）在纯 Node 中以 stub 的 `electron` 无头启动 profile 并固定一轮 transcript；`apps/electron/tests/window.e2e.ts`（web dist 构建后随 `pnpm run test:web`）经 Playwright 驱动真实窗口——解析后的 `webPreferences`、挂载的 `#root`、`window.__DSH_BOOT__`、被拒绝的外部导航；无显示环境自动跳过。
 
@@ -25,7 +25,7 @@ pnpm run dsh:electron                      # builds the app, then `electron .`
 |---|---|
 | `src/main.ts` | 应用生命周期：profile 引导、`dsh://` 注册、窗口偏好、导航锁、一次性树销毁。 |
 | `src/protocol.ts` | `dsh://` 请求处理器：注入引导图的 dist 文件、`/plugins/<id>/client.js[.map]` bundle、`/api/session.export` 透传。 |
-| `src/preload.ts` | 渲染进程桥——与 `dsh-client-connection` 读取的 `window.__DSH_IPC__` 形状逐字一致。 |
+| `src/preload.ts` | 渲染进程桥——与 `dsh-client-connection` 读取的 `window.__DSH_IPC__` 形状、以及 `dsh-client-ui-layout` 标题栏带读取的 `window.__DSH_WINDOW__` 形状逐字一致。 |
 | `build-preload.mjs` | 把 preload 用 esbuild 打成单个经典 CJS 文件（`preload/index.cjs`）。 |
 | `build/icon.svg` · `build/icon.png` | 窗口/任务栏图标：裸鲸鱼标（取自 `apps/web/public/favicon.svg`）墨色置于透明之上，与应用内标志一致。SVG 是源文件；PNG 供 `BrowserWindow` 加载（Electron 只接受位图图标）。 |
 
@@ -35,4 +35,4 @@ pnpm run dsh:electron                      # builds the app, then `electron .`
 
 ## 窗口姿态
 
-窗口以 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false` 运行；页面唯一的特权表面是四成员 IPC 桥。preload 是唯一的线上端点，`dsh://` 在 app ready 之前注册为特权 scheme（`standard`、`secure`、`supportFetchAPI`、`stream`）。
+窗口无边框（`frame: false`）：页面本身就是标题栏——ui-layout 的窗口带在中列与详情列之上渲染拖拽区和配色一致的最小化/最大化/关闭按钮，侧栏头部承担其所在列的拖拽；这些都只在 preload 注入了窗口桥时渲染，浏览器构建保持不变。窗口仍以 `sandbox: true`、`contextIsolation: true`、`nodeIntegration: false` 运行；页面仅有的特权表面是两座四成员桥（`__DSH_IPC__`、`__DSH_WINDOW__`）。preload 是唯一的线上端点，`dsh://` 在 app ready 之前注册为特权 scheme（`standard`、`secure`、`supportFetchAPI`、`stream`）。

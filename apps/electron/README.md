@@ -15,7 +15,7 @@ The window loads `dsh://app/`; `Ctrl+Shift+I` / `F12` opens DevTools. Navigation
 
 ## `--dsh-smoke`
 
-`electron . --dsh-smoke` replaces interactive lifetime with machine-checked assertions: the renderer must see the injected `window.__DSH_BOOT__` graph and the preload's `window.__DSH_IPC__` bridge, one request must cross the `dsh:fetch` IPC channel, and the booted profile must mount no `webServer` service. The process prints one `PASS`/`FAIL` line per assertion and exits 0 only when all pass; dialogs are suppressed so automation never blocks on a modal.
+`electron . --dsh-smoke` replaces interactive lifetime with machine-checked assertions: the renderer must see the injected `window.__DSH_BOOT__` graph, the preload's `window.__DSH_IPC__` bridge and `window.__DSH_WINDOW__` caption bridge, one request must cross the `dsh:fetch` IPC channel, and the booted profile must mount no `webServer` service. The process prints one `PASS`/`FAIL` line per assertion and exits 0 only when all pass; dialogs are suppressed so automation never blocks on a modal.
 
 Two keyless test suites complement it: `apps/electron/tests/electron-profile.snapshot.ts` (`pnpm run test:snapshot`) boots the profile headless in plain Node with `electron` stubbed and pins one transcript, and `apps/electron/tests/window.e2e.ts` (`pnpm run test:web`, after the web dist build) drives the real window through Playwright — resolved `webPreferences`, the mounted `#root`, `window.__DSH_BOOT__`, and refused external navigation; it self-skips on display-less hosts.
 
@@ -25,7 +25,7 @@ Two keyless test suites complement it: `apps/electron/tests/electron-profile.sna
 |---|---|
 | `src/main.ts` | App lifetime: profile boot, `dsh://` registration, window preferences, navigation locks, one-shot tree disposal. |
 | `src/protocol.ts` | The `dsh://` request handler: dist files with the boot-graph injection, `/plugins/<id>/client.js[.map]` bundles, `/api/session.export` passthrough. |
-| `src/preload.ts` | The renderer bridge — exactly the `window.__DSH_IPC__` shape `dsh-client-connection` reads. |
+| `src/preload.ts` | The renderer bridges — exactly the `window.__DSH_IPC__` shape `dsh-client-connection` reads and the `window.__DSH_WINDOW__` shape `dsh-client-ui-layout`'s caption band reads. |
 | `build-preload.mjs` | esbuild bundle of the preload into one classic CJS file (`preload/index.cjs`). |
 | `build/icon.svg` · `build/icon.png` | Window/taskbar icon: the bare whale mark (from `apps/web/public/favicon.svg`) in ink on transparency, matching the in-app mark. The SVG is the source; the PNG is what `BrowserWindow` loads (Electron takes raster icons only). |
 
@@ -35,4 +35,4 @@ The mark carries no tile, so it stays identical to the favicon and the UI logo; 
 
 ## Window posture
 
-The window runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`; the page's only privileged surface is the four-member IPC bridge. The preload is the sole wire endpoint, and `dsh://` is registered as a privileged scheme (`standard`, `secure`, `supportFetchAPI`, `stream`) before app ready.
+The window is frameless (`frame: false`): the page itself is the caption — ui-layout's window band renders the drag region and the theme-matched minimize/maximize/close controls over the center and details columns, and the sidebar header drags its own column; all of it renders only when the preload injected the window bridge, so the browser build stays unchanged. The window still runs with `sandbox: true`, `contextIsolation: true`, and `nodeIntegration: false`; the page's only privileged surfaces are the two four-member bridges (`__DSH_IPC__`, `__DSH_WINDOW__`). The preload is the sole wire endpoint, and `dsh://` is registered as a privileged scheme (`standard`, `secure`, `supportFetchAPI`, `stream`) before app ready.

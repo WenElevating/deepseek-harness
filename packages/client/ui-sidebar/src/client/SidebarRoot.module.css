@@ -107,6 +107,18 @@
   justify-content: flex-start;
 }
 
+/* Frameless desktop shell only (the ui-layout caption band sets
+   data-dsh-window-frame on the document root): the header row is the window
+   drag region over the sidebar column, and its buttons opt back out. Inert
+   everywhere else — plain browsers ignore app-region. */
+:global(:root[data-dsh-window-frame]) .logoRow {
+  -webkit-app-region: drag;
+}
+
+:global(:root[data-dsh-window-frame]) .logoRow button {
+  -webkit-app-region: no-drag;
+}
+
 /* Brand group (figma I133:7632): the full wordmark rides the text ink
    (figma flows: the main-screen instance is black; blue is brand
    emphasis only). A button only in behavior (New Session shortcut): the

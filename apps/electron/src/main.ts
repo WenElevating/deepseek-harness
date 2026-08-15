@@ -5,7 +5,7 @@
  * tree.
  * @module @deepseek-ai/dsh-electron/main
  */
-import { app, BrowserWindow, dialog, protocol } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { createRequire, registerHooks } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname } from 'node:path'
@@ -124,6 +124,12 @@ async function runSmokeChecks(ctx: Context, window: BrowserWindow): Promise<void
       && ['fetch', 'openStream', 'closeStream', 'onServerRequest'].every(member => typeof bridge[member] === 'function')
   })()`) as boolean
   check('renderer window.__DSH_IPC__ exposes the four bridge members', bridgePresent)
+  const windowBridgePresent = await window.webContents.executeJavaScript(`(() => {
+    const bridge = window.__DSH_WINDOW__
+    return bridge !== undefined
+      && ['minimize', 'toggleMaximize', 'close', 'onStateChange'].every(member => typeof bridge[member] === 'function')
+  })()`) as boolean
+  check('renderer window.__DSH_WINDOW__ exposes the four window-control members', windowBridgePresent)
   let roundTrip = false
   try {
     const answer = await window.webContents.executeJavaScript(
@@ -160,8 +166,29 @@ async function main(): Promise<void> {
     width: 1440,
     height: 900,
     icon: ICON_PATH,
+    // Frameless: the caption is the page itself (ui-layout's window band plus
+    // the sidebar header as drag regions); resize edges and snap stay native.
+    frame: false,
     webPreferences: { preload: PRELOAD_PATH, sandbox: true, contextIsolation: true, nodeIntegration: false },
   })
+  // The custom caption's only privileged needs: the three operations and the
+  // maximize state. `op` crosses the IPC wire, so the union is validated here.
+  ipcMain.handle('dsh:window:operate', (_event, op: unknown) => {
+    if (op === 'minimize') window.minimize()
+    else if (op === 'close') window.close()
+    else if (op === 'toggle-maximize') {
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    } else throw new Error(`dsh:window:operate: unknown op ${JSON.stringify(op)}`)
+  })
+  const sendWindowState = (): void => {
+    window.webContents.send('dsh:window:state', { maximized: window.isMaximized() })
+  }
+  window.on('maximize', sendWindowState)
+  window.on('unmaximize', sendWindowState)
+  // The preload buffers whatever arrives before the page subscribes, so this
+  // early push is not lost; without it the caption would guess its first icon.
+  window.webContents.once('did-finish-load', sendWindowState)
   // The desktop shell never navigates away from its own surface; new windows
   // are refused outright.
   window.webContents.setWindowOpenHandler(() => denyNavigation(window))

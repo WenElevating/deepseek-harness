@@ -46,6 +46,10 @@ preload（`apps/electron/src/preload.ts`）注入的 `window.__DSH_IPC__` 恰有
 
 `apps/electron` 主进程经 `runProfile`（CLI 的启动器入口，`@deepseek-ai/dsh/profile-boot`）引导 profile，注册 `dsh://`，打开一个沙箱窗口，以带因果链的错误框呈现引导失败，并在每条退出路径上恰好一次地销毁树；`--dsh-smoke` 以机器可校验的断言替换对话框与交互生命周期。`ElectronDirectoryPicker`（`packages/host/directory-picker-electron/src/index.ts`）在主进程内注册 `native` 能力——没有跨进程跳转——并替换 `-native` 行；两者都注册 `native` 能力，因此恰好一个后端行可以加载。
 
+### 无边框标题栏
+
+窗口以 `frame: false` 打开：页面本身就是标题栏。preload 暴露第二个四成员桥 `window.__DSH_WINDOW__`（`minimize`、`toggleMaximize`、`close`、`onStateChange`），走 `ipcMain.handle('dsh:window:operate')`——op 字符串跨线传输，在此对照联合类型校验——`dsh:window:state` 推送最大化状态，preload 缓冲并向迟到的订阅者重放（`did-finish-load` 时的首次推送早于 React 挂载）。ui-layout 的 WindowBand 仅在该桥存在时渲染：一条 36px 拖拽带载着配色一致的最小化/最大化/关闭按钮浮在中列与详情列之上（左缘 = `--dsh-frame-sidebar`，与 grid 轨道同帧写入并按同曲线缓动），两列经 `--dsh-caption-height` 预留带高，文档根标记 `data-dsh-window-frame`——同一标记也让侧栏 logo 行成为拖拽区（ui-sidebar），其按钮除外。纯浏览器不渲染其中任何一项，布局逐字节不变。
+
 ### 原生模块：不需要 electron-rebuild
 
 仓库的原生模块——`node-pty`（在 `dsh-subprocess-local` 之下）与 `koffi`——是 N-API 模块，其 prebuild 无需重编译即可在 Electron 内嵌 Node 中加载。`@electron/rebuild` 曾为工具链评估后被移除：桌面外壳与纯 Node 运行在同一批 prebuild 上，不存在需要维护的重编译步骤。对 `node-pty` 运行 `@electron/rebuild --force` 会覆盖其预构建二进制并删除 Windows `conpty` 支持文件，破坏终端后端；不要在本仓库运行它。
@@ -70,4 +74,4 @@ web profile 未从载体拆分获得任何新行为：其快照输出将该重�
 
 ## 验证
 
-`packages/client/connection/tests/node-half.host.spec.ts` 钉住认领语义（同载体重复认领被接受、异载体抛出、落定大声失败、引导途中销毁守卫），`ipc-api-client.client.spec.ts` 钉住渲染进程载体（流开启失败遏制、预中止顺序）；`packages/bundle/web-app/tests/web-server-optional.spec.ts` 钉住无服务器路径与迟到 webServer 失败；`packages/bundle/electron-app/tests/composition.spec.ts` 钉住组合后的行集；`apps/electron/tests/protocol.spec.ts` 钉住 `dsh://` 处理器（引导图注入顺序、MIME 映射、编码遍历拒绝、bundle 与导出路由）。`electron . --dsh-smoke` 引导真实 profile 并断言渲染进程的引导图、四成员桥、一次 `dsh:fetch` 往返、以及未挂载任何 `webServer` 服务，任一失败即非零退出；无密钥 profile 快照与 Playwright 窗口 e2e 由[测试笔记](../testing/2026-08-14-electron-profile-snapshot-and-window-e2e.md)拥有。
+`packages/client/connection/tests/node-half.host.spec.ts` 钉住认领语义（同载体重复认领被接受、异载体抛出、落定大声失败、引导途中销毁守卫），`ipc-api-client.client.spec.ts` 钉住渲染进程载体（流开启失败遏制、预中止顺序）；`packages/bundle/web-app/tests/web-server-optional.spec.ts` 钉住无服务器路径与迟到 webServer 失败；`packages/bundle/electron-app/tests/composition.spec.ts` 钉住组合后的行集；`packages/client/ui-layout/tests/window-band.client.spec.tsx` 钉住标题栏控制带（桥门控、文档标记生命周期、三个操作、缓冲状态重放）；`apps/electron/tests/protocol.spec.ts` 钉住 `dsh://` 处理器（引导图注入顺序、MIME 映射、编码遍历拒绝、bundle 与导出路由）。`electron . --dsh-smoke` 引导真实 profile 并断言渲染进程的引导图、两座四成员桥、一次 `dsh:fetch` 往返、以及未挂载任何 `webServer` 服务，任一失败即非零退出；无密钥 profile 快照与 Playwright 窗口 e2e（同样驱动标题栏：拖拽区已解析、经桥切换最大化、关闭即退出应用）由[测试笔记](../testing/2026-08-14-electron-profile-snapshot-and-window-e2e.md)拥有。

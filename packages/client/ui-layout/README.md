@@ -6,6 +6,8 @@ Shell plugin: three-column AppFrame (drag handles and concession chain) plus the
 
 AppFrame always mounts the conversation and details columns; a connected Session renders through `SessionProvider`. The transient layout store starts the sidebar at its default width and details closed, and it never reads or writes `localStorage`. Hero and other unselected states also derive a zero rendered details width without changing that stored preference. AppFrame retains the last non-blank Session id across those states: the first Session remains closed, an explicit details action opens the contract default width, returning to the same Session restores its unchanged width, and selecting a different Session closes details before paint. The conversation owner share is empty, while the sidebar owner share contains only `collapsed` and `width`; registrants obtain business data from standard hooks and actions from their own inject faces.
 
+The package also renders the desktop caption band (`WindowBand`): when the Electron preload injects the validated four-member `window.__DSH_WINDOW__` bridge, a 36px drag band with theme-matched minimize/maximize/close controls floats over the center and details columns (left edge at the live sidebar border), those columns reserve its height, and the document root is marked `data-dsh-window-frame` — the same mark under which the sidebar's header row drags its own column (ui-sidebar). No bridge, no band, no reserved height: the browser build is unchanged.
+
 The `/client` exports are the plugin body (`apply`/`inject`), `LayoutController`, and the four owner-share interfaces. AppFrame, the panel store, and the concession solver remain package-internal.
 
 ## Model Experience

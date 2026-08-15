@@ -34,12 +34,17 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* The desktop caption band floats over this top edge; under
+     data-dsh-window-frame (WindowBand.module.css defines the var) the columns
+     reserve its height so their headers start below it. Browsers: 0. */
+  padding-top: var(--dsh-caption-height, 0px);
 }
 
 .detailsCol {
   min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--dsw-alias-border-l2);
+  padding-top: var(--dsh-caption-height, 0px);
 }
 
 /* The details subtree stays mounted at zero width, so its border must not paint

@@ -1,0 +1,58 @@
+/* Desktop caption band: the frameless Electron shell's only chrome. The band
+   marks the document root with data-dsh-window-frame on mount; every caption
+   rule (this file's var, AppFrame's column inset, the sidebar header drag
+   region in ui-sidebar) keys off that attribute, so plain browsers keep the
+   exact frameless-free layout without a single conditional of their own. */
+
+:global(:root[data-dsh-window-frame]) {
+  /* One caption height for the band itself and the column inset (AppFrame). */
+  --dsh-caption-height: 36px;
+}
+
+.band {
+  position: absolute;
+  top: 0;
+  /* The band owns the caption only right of the sidebar column; the live
+     width arrives as --dsh-frame-sidebar, set beside the grid tracks. */
+  left: var(--dsh-frame-sidebar, 0px);
+  right: 0;
+  height: var(--dsh-caption-height, 36px);
+  display: flex;
+  justify-content: flex-end;
+  /* Above the columns, below the shell.overlay layer (z-index 20) so popups
+     that open near the caption still cover it. */
+  z-index: 10;
+  -webkit-app-region: drag;
+  /* Rides the same curve as the AppFrame tracks (custom properties do not
+     transition), so the band's edge stays glued to the moving column border. */
+  transition: left var(--ds-transition-duration-slow) var(--ds-ease-in-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .band {
+    transition: none;
+  }
+}
+
+.button {
+  -webkit-app-region: no-drag;
+  appearance: none;
+  flex: none;
+  width: 46px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: default;
+}
+
+.button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.close:hover {
+  /* Platform caption convention (Windows close red), not a theme token: the
+     destructive hover must stay unmistakable on both light and dark themes. */
+  background: #e81123;
+  color: #fff;
+}

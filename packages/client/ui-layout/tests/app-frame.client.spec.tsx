@@ -15,6 +15,9 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
+// Type-only: pulls this package's LocaleNamespaceMap merge ('layout') into the
+// program so the PropsLocale seat on AppFrameProps resolves concretely.
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import type {
@@ -88,6 +91,7 @@ function mountFrame() {
       useSessions={useSessions}
       useWorkspaces={((sel: (s: WorkspaceListState) => unknown) => sel(workspaceState)) as never}
       SessionProvider={SessionProviderStub}
+      t={key => key}
     />
   )
   const utils = render(element())
@@ -140,6 +144,19 @@ describe('AppFrame', () => {
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
+  })
+
+  it('publishes the live sidebar edge for the desktop caption band', () => {
+    const { frame, instance } = mountFrame()
+    expect(frame.style.getPropertyValue('--dsh-frame-sidebar')).toBe('280px')
+    act(() => { instance.actions.toggleSidebar() })
+    expect(frame.style.getPropertyValue('--dsh-frame-sidebar')).toBe(`${SIDEBAR_COLLAPSED}px`)
+  })
+
+  it('renders no desktop caption band without the window bridge', () => {
+    const { container } = mountFrame()
+    expect(container.querySelector('[data-dsh-window-band]')).toBe(null)
+    expect(document.documentElement.hasAttribute('data-dsh-window-frame')).toBe(false)
   })
 
   it('renders the session pair with empty owner shares (sessionId is framework-standard)', () => {
