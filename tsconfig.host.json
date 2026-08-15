@@ -82,6 +82,12 @@
     "apps/web/tests/pwsh-terminal.e2e.ts",
     "apps/web/tests/workflow-run.e2e.ts",
     "apps/web/stress-tests/reasoning-chunks.stress.ts",
+    "apps/electron/src/main.ts",
+    "apps/electron/src/protocol.ts",
+    "apps/electron/tests/protocol.spec.ts",
+    "apps/electron/tests/electron-profile.snapshot.ts",
+    "apps/electron/tests/fixtures/electron-profile/smoke.ts",
+    "apps/electron/tests/window.e2e.ts",
     "apps/cli/tests/**/*.ts",
     "examples/*/src/**/*.ts",
     "examples/*/start.ts",
@@ -242,6 +248,7 @@
     { "path": "./packages/bundle/base" },
     { "path": "./packages/bundle/headless" },
     { "path": "./packages/bundle/web-app" },
+    { "path": "./packages/bundle/electron-app" },
     { "path": "./packages/boot/app-boot" },
     { "path": "./packages/boot/cmdline" },
     { "path": "./packages/sdk/server" },
@@ -285,6 +292,13 @@
     { "path": "./packages/host/directory-picker-auto" },
     { "path": "./packages/host/directory-picker-browse" },
     { "path": "./packages/host/directory-picker-native" },
+    { "path": "./packages/host/directory-picker-electron" },
+    { "path": "./packages/host/connection-electron" },
+    // The desktop main process reads clientModules graph()/clientPath() directly
+    // (apps/electron); the reference redirects that import to this neutral
+    // package's declarations instead of pulling client source into the host
+    // program.
+    { "path": "./packages/client/modules" },
     { "path": "./packages/host/frontend-static" },
     { "path": "./packages/host/plugin-inventory" },
     { "path": "./packages/host/webserver" },

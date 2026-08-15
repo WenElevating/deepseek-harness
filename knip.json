@@ -120,6 +120,24 @@
         "tests/**/*.{ts,tsx}"
       ]
     },
+    "packages/host/directory-picker-electron": {
+      "entry": [
+        "tests/**/*.spec.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
+    "packages/host/connection-electron": {
+      "entry": [
+        "tests/**/*.spec.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "packages/client/web-ui": {
       "entry": [
         "tests/**/*.spec.{ts,tsx}"
@@ -740,6 +758,19 @@
         "@deepseek-ai/.+"
       ]
     },
+    "apps/electron": {
+      "entry": [
+        "src/preload.ts",
+        "tests/**/*.spec.ts",
+        "tests/**/*.e2e.ts",
+        "tests/**/*.snapshot.ts",
+        "tests/fixtures/electron-profile/smoke.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "packages/client/modules": {
       "entry": [
         "tests/**/*.spec.ts"
@@ -769,6 +800,11 @@
       ]
     },
     "packages/bundle/base": {
+      "ignoreDependencies": [
+        "@deepseek-ai/.+"
+      ]
+    },
+    "packages/bundle/electron-app": {
       "ignoreDependencies": [
         "@deepseek-ai/.+"
       ]

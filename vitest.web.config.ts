@@ -26,6 +26,7 @@ export default defineConfig({
     include: [
       'apps/web/tests/**/*.e2e.ts',
       'apps/web/tests/**/*.snapshot.ts',
+      'apps/electron/tests/**/*.e2e.ts',
     ],
     // Browser boot + real-model turns are slow; files share one browser, run serial.
     testTimeout: 180_000,

@@ -1,0 +1,37 @@
+{
+  "name": "@deepseek-ai/dsh-electron",
+  "description": "dsh desktop shell: Electron main/preload over the electron profile; dsh:// protocol + IPC carrier",
+  "version": "0.1.0-rc.5",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "apps/electron"
+  },
+  "type": "module",
+  "main": "lib/main.js",
+  "files": [
+    "lib",
+    "preload"
+  ],
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc -b tsconfig.json && node build-preload.mjs",
+    "start": "pnpm run build && electron ."
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "workspace:^",
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
+    "@deepseek-ai/dsh-client-modules": "workspace:^",
+    "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
+    "@deepseek-ai/dsh-web-frontend": "workspace:^"
+  },
+  "devDependencies": {
+    "electron": "^39.8.10",
+    "esbuild": "^0.25.0",
+    "playwright": "^1.49.0",
+    "typescript": "^6.0.3"
+  }
+}

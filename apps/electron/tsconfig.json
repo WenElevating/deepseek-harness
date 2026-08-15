@@ -1,0 +1,31 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    // The app is a leaf binary, not a linked library: no consumer reads its
+    // declarations, so the maps stay out of the published payload entirely.
+    "sourceMap": false,
+    "declarationMap": false,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../cli"
+    },
+    {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
+      "path": "../../packages/client/modules"
+    },
+    {
+      "path": "../../packages/host/apiproxy"
+    }
+  ]
+}
