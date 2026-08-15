@@ -19,6 +19,8 @@ const require = createRequire(import.meta.url)
 const DIST_ROOT = dirname(require.resolve('@deepseek-ai/dsh-web-frontend/dist/index.html'))
 /** The sandboxed preload bundle; esbuild emits exactly this classic CJS file. */
 const PRELOAD_PATH = fileURLToPath(new URL('../preload/index.cjs', import.meta.url))
+/** Window/taskbar icon: the bare whale mark on transparency; build/icon.svg is the source (see README). */
+const ICON_PATH = fileURLToPath(new URL('../build/icon.png', import.meta.url))
 const APP_ORIGIN = 'dsh://app'
 /** The desktop profile this shell boots. */
 const PROFILE = 'electron'
@@ -157,6 +159,7 @@ async function main(): Promise<void> {
   const window = new BrowserWindow({
     width: 1440,
     height: 900,
+    icon: ICON_PATH,
     webPreferences: { preload: PRELOAD_PATH, sandbox: true, contextIsolation: true, nodeIntegration: false },
   })
   // The desktop shell never navigates away from its own surface; new windows

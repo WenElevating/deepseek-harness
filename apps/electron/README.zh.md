@@ -27,6 +27,11 @@ pnpm run dsh:electron                      # builds the app, then `electron .`
 | `src/protocol.ts` | `dsh://` 请求处理器：注入引导图的 dist 文件、`/plugins/<id>/client.js[.map]` bundle、`/api/session.export` 透传。 |
 | `src/preload.ts` | 渲染进程桥——与 `dsh-client-connection` 读取的 `window.__DSH_IPC__` 形状逐字一致。 |
 | `build-preload.mjs` | 把 preload 用 esbuild 打成单个经典 CJS 文件（`preload/index.cjs`）。 |
+| `build/icon.svg` · `build/icon.png` | 窗口/任务栏图标：裸鲸鱼标（取自 `apps/web/public/favicon.svg`）墨色置于透明之上，与应用内标志一致。SVG 是源文件；PNG 供 `BrowserWindow` 加载（Electron 只接受位图图标）。 |
+
+## 图标
+
+标志不带底板，与 favicon 及应用内 logo 保持一致；静态 PNG 表达不了 favicon 的 `prefers-color-scheme` 切换，因此固定为浅色模式墨色。用已安装的 Electron 从 SVG 再生成 `build/icon.png`（无需额外工具）：一个隐藏窗口把 `build/icon.svg` 画到 256×256 画布，`toDataURL()` 写出 PNG —— `capturePage()` 会把不透明的页面背景合成进四角。打包 PR 会用 electron-builder 内嵌 `.ico` 取代这一步；在那之前窗口图标覆盖标题栏与任务栏，页面 favicon 走 dist 里的 `dsh://app/favicon.svg`。
 
 ## 窗口姿态
 

@@ -58,7 +58,7 @@ const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-web-frontend': ['dist', '!dist/**/*.map'],
   // The desktop shell ships its compiled main + the bundled sandboxed preload;
   // source maps are off in the app tsconfig, so the two directories are complete.
-  '@deepseek-ai/dsh-electron': ['lib', 'preload'],
+  '@deepseek-ai/dsh-electron': ['lib', 'preload', 'build'],
 }
 
 /** The subset of package.json fields this constraint check cares about. */

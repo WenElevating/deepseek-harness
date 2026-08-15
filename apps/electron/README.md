@@ -27,6 +27,11 @@ Two keyless test suites complement it: `apps/electron/tests/electron-profile.sna
 | `src/protocol.ts` | The `dsh://` request handler: dist files with the boot-graph injection, `/plugins/<id>/client.js[.map]` bundles, `/api/session.export` passthrough. |
 | `src/preload.ts` | The renderer bridge — exactly the `window.__DSH_IPC__` shape `dsh-client-connection` reads. |
 | `build-preload.mjs` | esbuild bundle of the preload into one classic CJS file (`preload/index.cjs`). |
+| `build/icon.svg` · `build/icon.png` | Window/taskbar icon: the bare whale mark (from `apps/web/public/favicon.svg`) in ink on transparency, matching the in-app mark. The SVG is the source; the PNG is what `BrowserWindow` loads (Electron takes raster icons only). |
+
+## Icon
+
+The mark carries no tile, so it stays identical to the favicon and the UI logo; a static PNG cannot express the favicon's `prefers-color-scheme` flip, so the light-mode ink is fixed. Regenerate `build/icon.png` from the SVG with the installed Electron (no extra tooling): a hidden window draws `build/icon.svg` onto a 256×256 canvas and `toDataURL()` writes the PNG — `capturePage()` would composite the opaque page background into the corners. A packaging PR replaces this with an embedded `.ico` via electron-builder; until then the window icon covers the title bar and taskbar, and the page favicon rides `dsh://app/favicon.svg` from the dist.
 
 ## Window posture
 

@@ -14,7 +14,8 @@
   "main": "lib/main.js",
   "files": [
     "lib",
-    "preload"
+    "preload",
+    "build"
   ],
   "license": "MIT",
   "scripts": {
