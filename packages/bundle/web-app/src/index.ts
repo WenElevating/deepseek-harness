@@ -5,7 +5,9 @@
  * the built frontend dist (workspace knowledge of this bundle, never user
  * config), mounts the `frontend-static` fallback owner over it, registers the
  * harness-source and web-surface prompt sections, the bash-visible web runtime
- * variable, and the URL line. App command-line values arrive through the
+ * variable, and the URL line. Without a webServer the plugin still provides
+ * the `webRuntime` service as an empty trust snapshot and mounts none of the
+ * HTTP-bound glue. App command-line values arrive through the
  * `webStartup` service expressions in the bundle patch.
  * @module @deepseek-ai/dsh-web-app
  */
@@ -31,8 +33,8 @@ const SOURCE_ROOT = fileURLToPath(new URL('../../../..', import.meta.url))
 /** Runtime service that releases Web rows after bind-dependent values resolve. */
 const WEB_RUNTIME_SERVICE = 'webRuntime'
 
-/** Services required before the web runtime can mount. */
-export const inject = ['webServer']
+/** Services required before the web runtime can mount (none: the HTTP carrier is optional). */
+export const inject: string[] = []
 
 /** Plugin config: composed deployment settings plus per-invocation command-line values. */
 export interface Config {
@@ -128,14 +130,43 @@ export const internals: { resolveDistIndex: () => string } = { resolveDistIndex 
 
 /**
  * Mount the Web runtime: dist serving, surface prompt, the bash runtime
- * variable, and the URL line.
- * @param ctx - plugin context carrying the webServer service.
+ * variable, and the URL line. Without a webServer (a server-less profile,
+ * e.g. the Electron main process) only the `webRuntime` service is provided
+ * as an empty trust snapshot, so the `connection` row's inject still
+ * resolves; every HTTP-bound mount stays behind the server-present path.
+ * @param ctx - plugin context; the webServer service is optional. Presence is
+ * sampled non-strictly while that row may still be binding, so the webserver
+ * row must be created before this row (the shipped patch orders it so); a
+ * webServer first visible after Loader settlement throws.
  * @param config - validated {@link Config}.
  */
 export function apply(ctx: Context, config: Config): void {
-  const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
+  // Non-strict: a webserver fiber that is still binding counts as present —
+  // its bind host is config-derived and readable before the listen settles.
+  const server = ctx.get('webServer', false)
+  // No HTTP carrier: the trust fence does not exist, and dependent rows
+  // only read the provided webRuntime fields.
+  const runtime = server === undefined
+    ? { lanAddresses: [], trustedHosts: [] }
+    : resolveLanTrust(server.host, config.trustedHosts)
   // Release dependent rows only after bind-dependent trust has been sampled once.
   ctx.provide(WEB_RUNTIME_SERVICE, runtime)
+  if (server === undefined) {
+    // Misordered rows fail loud: a composition that ships a webServer orders
+    // its row before this row. A webServer first visible at Loader settlement
+    // means this row already committed to the server-less path beside a live
+    // server; the thrown error reaches the app-boot unhandled-rejection
+    // guard, which exits the process with the diagnostic.
+    const settled = ctx.get('loader')?.await()
+    if (settled !== undefined) {
+      void settled.then(() => {
+        if (ctx.get('webServer', false) === undefined) return
+        throw new Error('web-app: webServer appeared only after this row committed to the server-less path; order the webserver row before web-runtime')
+      // Loader reports a failed boot; this check only stays quiet.
+      }, () => {})
+    }
+    return
+  }
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
@@ -164,7 +195,7 @@ export function apply(ctx: Context, config: Config): void {
     const printUrl = (): void => {
       // Reuse the exact LAN snapshot provided to the /api trust fence.
       const lanCandidate = runtime.lanAddresses[0]
-      const port = ctx.webServer.port
+      const port = server.port
       console.log(`dsh web: ${localWebUrl(ctx)}${lanCandidate === undefined ? '' : ` (LAN: http://${lanCandidate}:${String(port)})`}`)
     }
     // This row's own activation can precede a sibling failure. The app owns

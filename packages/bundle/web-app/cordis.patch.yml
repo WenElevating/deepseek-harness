@@ -123,10 +123,13 @@
     # assembly fact of dsh-web-app, never user config), mounts the
     # frontend-static fallback owner, registers the web-surface prompt
     # section and the bash runtime variable, and prints the URL line. The
-    # webStartup provider supplies invocation-only values; after the server
-    # binds, this row samples LAN trust once and provides `webRuntime`. A
-    # complete agent-preset persona suppresses the prompt section for that
-    # agent while retaining the host-owned shell variable.
+    # webStartup provider supplies invocation-only values; this row samples
+    # LAN trust once from the webserver row's configured bind — that row
+    # must precede this one, and may still be binding — and provides
+    # `webRuntime`; with no webServer row it provides the empty snapshot and
+    # mounts none of the HTTP glue. A complete agent-preset persona
+    # suppresses the prompt section for that agent while retaining the
+    # host-owned shell variable.
     - id: web-runtime
       name: '@deepseek-ai/dsh-web-app'
       inject: [webStartup]

@@ -1,12 +1,14 @@
 /**
- * Browser wire client. The plugin selects fixture or HTTP transport, provides
- * the shared API client, and lets the runtime object layer start the stream
- * controller with its sinks.
+ * Browser wire client. The plugin selects fixture, IPC, or HTTP transport,
+ * provides the shared API client, and lets the runtime object layer start the
+ * stream controller with its sinks.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
+import { IpcApiClient, createIpcConnectionRpc } from './ipc-api-client.ts'
+import { readIpcBridge } from './ipc-bridge.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
@@ -58,9 +60,9 @@ export const inject: string[] = []
  * is ready — connection stays consumer-agnostic).
  */
 export interface ConnectionHandle {
-  /** Shared api client (fixture or real, decided at boot from the page URL). */
+  /** Shared api client (fixture or real; fixture/IPC/HTTP picked at boot from the page URL and the preload bridge). */
   readonly api: IApiClient
-  /** Whether the current page authority is loopback; non-browser contexts default to true. */
+  /** Whether the current page authority is loopback; non-browser contexts and the desktop shell's renderer default to true. */
   readonly isLoopback: boolean
   /** Generation-scoped Host facts, including native path-open capability. */
   readonly hostDescription: HostDescriptionSource
@@ -84,9 +86,11 @@ export interface ConnectionHandle {
 export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
+  const bridge = readIpcBridge()
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
-  const api: IApiClient = fixtureClient ?? new WebApiClient()
-  const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
+  const api: IApiClient = fixtureClient ?? (bridge !== undefined ? new IpcApiClient(bridge) : new WebApiClient())
+  const rpc = fixtureClient?.rpc
+    ?? (bridge !== undefined ? createIpcConnectionRpc(bridge) : createWebConnectionRpc())
   let started = false
   let description: HostDescription | undefined
   const descriptionListeners = new Set<() => void>()
@@ -103,7 +107,10 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    // The IPC carrier is the app's own renderer — a trusted context strictly
+    // stronger than a loopback page; without this the dsh:// hostname would
+    // silently degrade openPath and host-scoped settings affordances.
+    isLoopback: pageLocation === undefined || bridge !== undefined || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {

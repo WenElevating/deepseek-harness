@@ -3,9 +3,10 @@
  * the host Loader's entries for packages declaring `dsh.client`, composes the
  * `window.__DSH_BOOT__` entry graph (wire single source: {@link WebBootEntry}
  * in `./client/manifest.ts`), serves `/plugins/<id>/client.js` and its source
- * map, taps the index render to inject the boot manifest, and provides the
- * `clientModuleHost` service (the HMR node half's registration/notification
- * face).
+ * map and taps the index render to inject the boot manifest when a webServer
+ * is mounted (both bind lazily; server-less hosts read the graph directly),
+ * and provides the `clientModuleHost` service (the HMR node half's
+ * registration/notification face).
  *
  * Scanning is incremental per package — there is no full-rescan code path.
  * Every cordis `internal/plugin` emission (fiber construction/disposal) marks
@@ -176,13 +177,14 @@ export function injectBootManifest(html: string, graph: WebBootGraph): string {
 
 /**
  * The web plugin table service: incremental `dsh.client` scan + wire composition
- * + bundle route + index tap. Construction runs the activation scan
- * synchronously — a malformed declaration or missing bundle among the
- * already-loaded entries aggregates into one loud throw (FAILED fiber; the
- * boot activation audit reports it).
+ * + bundle route + index tap (the HTTP bindings mount only under a webServer;
+ * without one the service still composes the graph for direct reads).
+ * Construction runs the activation scan synchronously — a malformed
+ * declaration or missing bundle among the already-loaded entries aggregates
+ * into one loud throw (FAILED fiber; the boot activation audit reports it).
  */
 export class ClientModuleRegistry extends Service {
-  static inject = ['webServer', 'loader']
+  static inject = ['loader']
 
   private readonly table = new Map<string, WebPluginRecord>()
   // Negative verdicts (unresolvable specifier — builtins like cordis:include,
@@ -198,7 +200,9 @@ export class ClientModuleRegistry extends Service {
 
   /**
    * Build the service: subscribe, seed, and run the activation flush.
-   * @param ctx - plugin context carrying webServer and loader.
+   * @param ctx - plugin context carrying the loader; a webServer is optional
+   * (mounted: the bundle route and index tap bind through a lazy inject;
+   * absent: graph/client-path reads only).
    */
   constructor(ctx: Context) {
     super(ctx, 'clientModules')
@@ -238,14 +242,19 @@ export class ClientModuleRegistry extends Service {
       throw new ClientPackageCompositionError(failures)
     }
 
-    ctx.effect(
-      () => ctx.webServer.register({ kind: 'prefix', path: '/plugins', handler: this.serveBundle }),
-      'client-modules: bundle route',
-    )
-    ctx.effect(
-      () => ctx.webServer.tapIndex(html => injectBootManifest(html, this.composed)),
-      'client-modules: boot manifest injection',
-    )
+    // HTTP is one physical carrier among others: the bundle route and index
+    // tap mount only when a webServer exists; server-less hosts (Electron
+    // main process) read graph()/clientPath() directly.
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.effect(
+        () => webCtx.webServer.register({ kind: 'prefix', path: '/plugins', handler: this.serveBundle }),
+        'client-modules: bundle route',
+      )
+      webCtx.effect(
+        () => webCtx.webServer.tapIndex(html => injectBootManifest(html, this.composed)),
+        'client-modules: boot manifest injection',
+      )
+    })
   }
 
   /**

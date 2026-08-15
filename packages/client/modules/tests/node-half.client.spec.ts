@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WebServer, WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import { ClientModuleRegistry } from '../src/index.ts'
 
@@ -37,8 +37,13 @@ function writePackage(
   return clientPath
 }
 
-/** Construct the node-half service and capture its plugin-bundle route. */
-function constructWithRoute(packageNames: string[]): { service: ClientModuleRegistry; route: WebRoute } {
+/**
+ * Construct the node-half service and capture its plugin-bundle route. The
+ * HTTP bindings mount through the lazy `webServer` inject (a fiber load, so
+ * not synchronous with construction) — wait out that injection before
+ * asserting on the route.
+ */
+async function constructWithRoute(packageNames: string[]): Promise<{ service: ClientModuleRegistry; route: WebRoute }> {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(root!).href + '/'
   ctx.provide('loader', {
@@ -59,17 +64,19 @@ function constructWithRoute(packageNames: string[]): { service: ClientModuleRegi
   }
   ctx.provide('webServer', webServer as WebServer)
   const service = new ClientModuleRegistry(ctx)
-  if (route === undefined) throw new Error('client bundle route was not registered')
-  return { service, route }
+  await vi.waitFor(() => {
+    if (route === undefined) throw new Error('client bundle route was not registered')
+  })
+  return { service, route: route! }
 }
 
 /** Construct the node-half service over the enabled fixture entries. */
-function construct(packageNames: string[]): ClientModuleRegistry {
-  return constructWithRoute(packageNames).service
+async function construct(packageNames: string[]): Promise<ClientModuleRegistry> {
+  return (await constructWithRoute(packageNames)).service
 }
 
 describe('client bundle activation', () => {
-  it('allows sibling dsh roles', () => {
+  it('allows sibling dsh roles', async () => {
     const currentName = '@fixture/current-client-field'
     const clientPath = writePackage(currentName, {
       dsh: {
@@ -80,15 +87,15 @@ describe('client bundle activation', () => {
     })
     mkdirSync(dirname(clientPath), { recursive: true })
     writeFileSync(clientPath, 'module.exports = {}\n')
-    expect(construct([currentName]).graph().entries.map(entry => entry.id)).toEqual([currentName])
+    expect((await construct([currentName])).graph().entries.map(entry => entry.id)).toEqual([currentName])
   })
 
-  it('groups missing bundles under one source-build instruction with a package/path list', () => {
+  it('groups missing bundles under one source-build instruction with a package/path list', async () => {
     const firstName = '@fixture/missing-first'
     const secondName = '@fixture/missing-second'
     const firstPath = writePackage(firstName)
     const secondPath = writePackage(secondName)
-    expect(() => construct([firstName, secondName])).toThrow([
+    await expect(construct([firstName, secondName])).rejects.toThrow([
       'client-modules: 2 client packages failed to compose:',
       '  client bundles not found; run `pnpm run build` before launch:',
       `    - package: ${firstName}`,
@@ -98,13 +105,13 @@ describe('client bundle activation', () => {
     ].join('\n'))
   })
 
-  it('does not report other bundle read failures as missing builds', () => {
+  it('does not report other bundle read failures as missing builds', async () => {
     const packageName = '@fixture/unreadable-client'
     const clientPath = writePackage(packageName)
     mkdirSync(clientPath, { recursive: true })
     let thrown: unknown
     try {
-      construct([packageName])
+      await construct([packageName])
     } catch (error) {
       thrown = error
     }
@@ -121,7 +128,7 @@ describe('client bundle activation', () => {
     writeFileSync(clientPath, 'module.exports = {}\n')
     const map = '{"version":3,"sources":["src/client/index.tsx"]}\n'
     writeFileSync(`${clientPath}.map`, map)
-    const { route } = constructWithRoute([packageName])
+    const { route } = await constructWithRoute([packageName])
     let status = 0
     let headers: Record<string, string> | undefined
     let body = ''

@@ -6,6 +6,7 @@
     "tsBuildInfoFile": "lib/tsconfig.host.tsbuildinfo"
   },
   "files": [
+    "src/api-fallback.ts",
     "src/api-path.ts",
     "src/api-request-trust.ts",
     "src/http-bridge.ts",
@@ -28,6 +29,9 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../../vendor/loader"
     }
   ]
 }

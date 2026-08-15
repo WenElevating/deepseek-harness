@@ -11,13 +11,14 @@ import {
   type RpcId as RpcIdType,
   type ServerResponse as RpcServerResponse,
 } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { bridge, type FetchHandler } from './http-bridge.ts'
+import { bridge } from './http-bridge.ts'
 import { isTrustedApiRequest } from './api-request-trust.ts'
 import { API_PATH } from './api-path.ts'
 import type {
   ConnectionRpcEndpointMatcher,
   ConnectionRpcHandler,
   ConnectionRpcHandlerOptions,
+  FetchHandler,
   HostConnectionHandle,
   HostConnectionRpc,
 } from './rpc.ts'
@@ -43,8 +44,12 @@ declare module '@deepseek-ai/cordis' {
 export class HostConnectionService extends Service implements HostConnectionHandle {
   private readonly interceptors = new Map<string, ConnectionRpcInterceptor>()
 
+  /** Identity of the one physical carrier that claimed the Host half. */
+  private carrier?: string
+
   /**
-   * Provide the Host half over the active HTTP server.
+   * Provide the Host half over the owning plugin's context; the physical
+   * carrier mounts separately and claims its seat via {@link claimCarrier}.
    * @param ctx - owning Connection plugin context.
    * @param trustedHosts - deployment authorities accepted by trusted-host channels.
    */
@@ -59,6 +64,34 @@ export class HostConnectionService extends Service implements HostConnectionHand
       handle: (channel, handler, options) => this.register(owner, channel, handler, options),
       intercept: (channel, matches, handler, options) =>
         this.registerInterceptor(owner, channel, matches, handler, options),
+    }
+  }
+
+  /**
+   * Claim the single physical-carrier seat for the Host half. The HTTP
+   * carrier (`http-webserver`) and an IPC carrier each claim once; a claim by
+   * a different carrier while the seat is taken is a miscomposition and
+   * throws. Re-claiming the same carrier is accepted: the HTTP claim sits in
+   * a webServer inject fiber that re-runs when that service restarts, and the
+   * seat it records does not change.
+   * @param carrier - carrier identity, e.g. `http-webserver` or `electron-ipc`.
+   * @throws when a different carrier already claimed the seat.
+   */
+  claimCarrier(carrier: string): void {
+    if (this.carrier !== undefined && this.carrier !== carrier) {
+      throw new Error(`connection: carrier ${JSON.stringify(this.carrier)} already claimed the Host half; refusing claim by ${JSON.stringify(carrier)}`)
+    }
+    this.carrier = carrier
+  }
+
+  /**
+   * Assert some physical carrier claimed the Host half.
+   * @throws when no carrier ever claimed — a composition that mounts neither
+   * the HTTP carrier nor an IPC carrier plugin.
+   */
+  assertCarried(): void {
+    if (this.carrier === undefined) {
+      throw new Error('connection: no physical carrier mounted; exactly one carrier (the webServer HTTP carrier or an IPC carrier plugin) must claim the Host half')
     }
   }
 
@@ -93,6 +126,10 @@ export class HostConnectionService extends Service implements HostConnectionHand
     handler: ConnectionRpcHandler,
     options: ConnectionRpcHandlerOptions,
   ): () => Promise<void> {
+    const webServer = owner.get('webServer')
+    if (webServer === undefined) {
+      throw new Error(`connection: generic RPC channel ${JSON.stringify(channel)} requires the HTTP carrier; this composition mounts no webServer`)
+    }
     assertChannel(channel)
     const trustedHosts = options.authority === 'loopback' ? [] : this.trustedHosts
     const fetchHandler = rpcFetchHandler(channel, handler)
@@ -109,7 +146,7 @@ export class HostConnectionService extends Service implements HostConnectionHand
       },
     }
     return owner.effect(
-      () => owner.webServer.register(route),
+      () => webServer.register(route),
       `client-connection: ${channel} rpc channel`,
     )
   }

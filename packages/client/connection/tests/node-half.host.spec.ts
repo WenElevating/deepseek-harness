@@ -3,14 +3,23 @@ import { EventEmitter, once } from 'node:events'
 import { createServer, request as httpRequest } from 'node:http'
 import { PassThrough, Readable } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AddressInfo } from 'node:net'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import type { Loader } from '@deepseek-ai/cordis-plugin-loader'
 import { RpcId, type ClientRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { WebServer, WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
-import { API_PATH, apply, HOST_EVENTS_PATH, inject, MUX_EVENTS_PATH, type HostConnectionHandle } from '../src/index.ts'
+import {
+  API_PATH,
+  apply,
+  HostConnectionService,
+  HOST_EVENTS_PATH,
+  inject,
+  MUX_EVENTS_PATH,
+  type HostConnectionHandle,
+} from '../src/index.ts'
 
 /** Structural webServer fake recording both route registries. */
 function fakeHttpServer(
@@ -88,6 +97,109 @@ async function mounted(config?: { trustedHosts?: string[] }): Promise<{
   await fiber.await()
   return { routes, upgrades, dispose: () => fiber.dispose() }
 }
+
+/** Capture process-level unhandled rejections for the returned assert/inspect pair. */
+function trackUnhandledRejections(): { rejections: unknown[]; off: () => void } {
+  const rejections: unknown[] = []
+  const onUnhandled = (reason: unknown): void => { rejections.push(reason) }
+  process.on('unhandledRejection', onUnhandled)
+  return { rejections, off: () => process.off('unhandledRejection', onUnhandled) }
+}
+
+describe('connection carrier claim', () => {
+  it('refuses a second carrier claim but tolerates the same carrier re-claiming', async () => {
+    const ctx = new Context()
+    const connection = new HostConnectionService(ctx, [])
+    connection.claimCarrier('http-webserver')
+    // The HTTP claim sits inside a webServer inject fiber that re-runs when
+    // that service restarts; the seat it records does not change.
+    expect(() => { connection.claimCarrier('http-webserver') }).not.toThrow()
+    expect(() => { connection.claimCarrier('electron-ipc') }).toThrow('already claimed')
+    connection.assertCarried()
+    await ctx.fiber.dispose()
+  })
+
+  it('claims the HTTP carrier when the webServer inject activates', async () => {
+    const ctx = new Context()
+    const routes: WebRoute[] = []
+    ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    expect(() => { (ctx.get('connection') as HostConnectionHandle).assertCarried() }).not.toThrow()
+    await fiber.dispose()
+  })
+
+  it('fails loud at loader settlement when no carrier claimed the service', async () => {
+    const ctx = new Context()
+    let resolveSettlement!: () => void
+    const settled = new Promise<void>((resolve) => { resolveSettlement = resolve })
+    ctx.provide('loader', { await: () => settled } as unknown as Loader)
+    const { rejections, off } = trackUnhandledRejections()
+    try {
+      const fiber = ctx.plugin({ inject: [...inject], apply })
+      await fiber.await()
+      // Settlement stands for the assembled tree's readiness: after it, no
+      // carrier claiming the Host half is a miscomposition, and the thrown
+      // error surfaces as the unhandled rejection the app-boot guard turns
+      // into a fatal exit.
+      resolveSettlement()
+      await vi.waitFor(() => { expect(rejections).toHaveLength(1) })
+      expect((rejections[0] as Error).message).toContain('no physical carrier mounted')
+    } finally {
+      off()
+    }
+    await ctx.fiber.dispose()
+  })
+
+  it('stays quiet when the tree is disposed before settlement (early shutdown mid-boot)', async () => {
+    const ctx = new Context()
+    let resolveSettlement!: () => void
+    const settled = new Promise<void>((resolve) => { resolveSettlement = resolve })
+    ctx.provide('loader', { await: () => settled } as unknown as Loader)
+    const { rejections, off } = trackUnhandledRejections()
+    try {
+      const fiber = ctx.plugin({ inject: [...inject], apply })
+      await fiber.await()
+      // A clean early shutdown (SIGTERM) tears the tree down while the boot is
+      // still in flight: by settlement the Host half is disposed and has no
+      // carriership left to assert, so the check must stay quiet instead of
+      // failing the shutdown with the miscomposition error.
+      await ctx.fiber.dispose()
+      resolveSettlement()
+      await settled
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(rejections).toEqual([])
+    } finally {
+      off()
+    }
+  })
+
+  it('fails loud in a loader-less tree once sibling fibers settle and no carrier claimed', async () => {
+    const ctx = new Context()
+    const { rejections, off } = trackUnhandledRejections()
+    try {
+      const fiber = ctx.plugin({ inject: [...inject], apply })
+      await fiber.await()
+      // A hand-built tree has no Loader, so the check runs on the next
+      // microtask — after a webServer provided before this plugin would have
+      // activated its inject fiber and claimed.
+      await vi.waitFor(() => { expect(rejections).toHaveLength(1) })
+      expect((rejections[0] as Error).message).toContain('no physical carrier mounted')
+    } finally {
+      off()
+    }
+    await ctx.fiber.dispose()
+  })
+
+  it('refuses a generic RPC channel registration when no webServer is mounted', async () => {
+    const ctx = new Context()
+    const connection = new HostConnectionService(ctx, [])
+    expect(() => connection.rpc.handle('/rpc', async () => ({ ok: true, value: null }), {
+      authority: 'trusted-host',
+    })).toThrow('requires the HTTP carrier')
+    await ctx.fiber.dispose()
+  })
+})
 
 describe('connection node half', () => {
   it('fails loud when the carrier cap cannot hold the configured image batch', () => {
