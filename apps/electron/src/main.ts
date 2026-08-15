@@ -30,14 +30,28 @@ const smoke = process.argv.includes(SMOKE_FLAG)
 
 /**
  * Electron's embedded Node hides the internal ESM loader (the
- * node-addon-require-builtin realm probe finds no compatible symbol), so the
- * vendored Loader falls back to importing plugin specifiers from its own
+ * node-addon-require-builtin realm probe finds no compatible symbol), so
+ * the vendored Loader falls back to importing plugin specifiers from its own
  * package, where no workspace dependency resolves. The hook retries each
- * failed `@deepseek-ai/` import anchored at the booted profile's directory:
- * the parent-walk from there reaches both the profile's own node_modules and
- * the launcher-maintained `$DSH_HOME/profiles/node_modules` fallback — the
- * same resolution the internal-loader path provides under plain Node.
+ * failed bare-package import anchored at the booted profile's directory:
+ * the parent-walk from there reaches both the profile's own node_modules
+ * (out-of-tree plugins installed by `dsh plugin add`, under any package
+ * name) and the launcher-maintained `$DSH_HOME/profiles/node_modules`
+ * fallback — the same resolution the internal-loader path provides under
+ * plain Node.
  */
+function isBarePackageSpecifier(specifier: string): boolean {
+  // Relative and absolute paths resolve against their importer, `node:` and
+  // builtin names never fail resolution, and `#`-imports resolve through the
+  // importer's own `imports` field — none can resolve differently under the
+  // profile anchor, so only package names are retried.
+  return specifier !== ''
+    && !specifier.startsWith('.')
+    && !specifier.startsWith('/')
+    && !specifier.startsWith('node:')
+    && !specifier.startsWith('#')
+}
+
 function installProfileResolutionRetry(): void {
   let anchor: string | undefined
   registerHooks({
@@ -45,7 +59,7 @@ function installProfileResolutionRetry(): void {
       try {
         return nextResolve(specifier, context)
       } catch (error) {
-        if (!specifier.startsWith('@deepseek-ai/')) throw error
+        if (!isBarePackageSpecifier(specifier)) throw error
         anchor ??= `${pathToFileURL(resolveProfileDir(PROFILE)).href}/`
         return nextResolve(specifier, { ...context, parentURL: anchor })
       }

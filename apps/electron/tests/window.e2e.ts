@@ -3,16 +3,18 @@
  * Playwright's Electron support and pins its security posture — a sandboxed,
  * context-isolated, node-integration-off renderer over the `dsh://app`
  * origin, with the boot graph injected and external navigation refused. The
- * committed `--dsh-smoke` flag stays a local automation gate (boot graph,
- * bridge members, carrier round-trip; the headless profile snapshot is the
- * CI signal); this suite covers what only a
- * real window proves: the BrowserWindow's resolved webPreferences and the
- * renderer's actual document. Self-skips on display-less hosts and on an
- * explicit `DSH_ELECTRON_E2E=0` opt-out.
+ * booted profile carries an unscoped out-of-tree plugin installed through
+ * the documented `dsh plugin add` flow, proving the profile-anchored import
+ * retry covers arbitrary package names. The committed `--dsh-smoke` flag
+ * stays a local automation gate (boot graph, bridge members, carrier
+ * round-trip; the headless profile snapshot is the CI signal); this suite
+ * covers what only a real window proves: the BrowserWindow's resolved
+ * webPreferences and the renderer's actual document. Self-skips on
+ * display-less hosts and on an explicit `DSH_ELECTRON_E2E=0` opt-out.
  */
 
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -26,11 +28,19 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 // would escape Playwright's closing quote and hand Electron an argument
 // ending in a literal `"` (it then fails to find the app).
 const APP_ROOT = dirname(fileURLToPath(new URL('.', import.meta.url)))
+/** The repository root, where `pnpm dsh ...` runs from source. */
+const REPO_ROOT = dirname(APP_ROOT)
 /** The web frontend dist the `dsh://` protocol serves; `pnpm run test:web` builds it. */
 const WEB_DIST_INDEX = fileURLToPath(new URL('../../web/dist/index.html', import.meta.url))
 /** The Electron binary: the installed `electron` package's plain-Node export is its path. */
 const ELECTRON_EXECUTABLE = createRequire(import.meta.url)('electron') as string
 const APP_ORIGIN = 'dsh://app'
+/**
+ * Main-process flag the out-of-tree fixture plugin's apply() sets: an
+ * unscoped package name is exactly the case the profile-anchored resolution
+ * retry must rescue (`@deepseek-ai/`-prefixed rows always resolved).
+ */
+const OUT_OF_TREE_FLAG = '__dshE2ePluginLoaded'
 
 /** A window needs a display: win32/darwin have one, elsewhere DISPLAY or WAYLAND_DISPLAY must name it. */
 const windowAvailable = process.env.DSH_ELECTRON_E2E !== '0'
@@ -42,6 +52,33 @@ describe.skipIf(!windowAvailable)('desktop shell window e2e', () => {
   let page: Page
   /** The isolated temp harness home; afterAll removes it once the app is gone. */
   let harnessHome: string | undefined
+  /** The temp checkout of the out-of-tree fixture plugin; afterAll removes it. */
+  let pluginDir: string | undefined
+
+  /** Write the out-of-tree fixture plugin: an unscoped bundle whose row imports by bare name. */
+  async function installOutOfTreePlugin(home: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-e2e-plugin-'))
+    await writeFile(join(dir, 'package.json'), `${JSON.stringify({
+      name: 'dsh-e2e-plugin',
+      version: '0.0.0',
+      type: 'module',
+      main: 'index.js',
+      files: ['index.js', 'cordis.patch.yml'],
+      dsh: { bundle: { patch: './cordis.patch.yml' } },
+    }, undefined, 2)}\n`)
+    await writeFile(join(dir, 'index.js'),
+      `export const name = 'dsh-e2e-plugin'\n\nexport function apply() {\n  globalThis.${OUT_OF_TREE_FLAG} = true\n}\n`)
+    await writeFile(join(dir, 'cordis.patch.yml'),
+      '- insert:\n    - id: e2e-plugin\n      name: dsh-e2e-plugin\n')
+    // The documented out-of-tree flow (docs/user/develop/basic/publish.md):
+    // init the profile from the shipped template, link the package, and let
+    // the reconcile append its bundle layer — all inside the isolated home.
+    await execa('pnpm', ['dsh', 'plugin', '--profile', 'electron', 'add', dir], {
+      cwd: REPO_ROOT,
+      env: { ...process.env, DSH_HOME: home },
+    })
+    return dir
+  }
 
   beforeAll(async () => {
     if (!existsSync(WEB_DIST_INDEX)) {
@@ -54,13 +91,26 @@ describe.skipIf(!windowAvailable)('desktop shell window e2e', () => {
     // The app writes its profile, settings, and sessions under $DSH_HOME: an
     // isolated temp home keeps the e2e off the developer's real harness home.
     harnessHome = await mkdtemp(join(tmpdir(), 'dsh-electron-window-e2e-'))
+    pluginDir = await installOutOfTreePlugin(harnessHome)
     electronApp = await _electron.launch({
       executablePath: ELECTRON_EXECUTABLE,
       args: [APP_ROOT],
       env: { ...process.env, DSH_HOME: harnessHome },
     })
     page = await electronApp.firstWindow({ timeout: 90_000 })
-  }, 180_000)
+    // A fresh home always runs the two-step GUI onboarding (ui-settings-models):
+    // the internal-testing notice, then the API-key dialog. Each modal's mask
+    // intercepts every pointer event on the page, so acknowledge both — the
+    // keyless "configure later" path — before any test drives the window.
+    await page
+      .getByRole('button', { name: '继续' })
+      .or(page.getByRole('button', { name: 'Continue' }))
+      .click({ timeout: 30_000 })
+    await page
+      .getByRole('button', { name: '稍后配置' })
+      .or(page.getByRole('button', { name: 'Configure later' }))
+      .click({ timeout: 30_000 })
+  }, 240_000)
 
   afterAll(async () => {
     // Close the window first, exactly like a user quitting the app: the
@@ -78,6 +128,21 @@ describe.skipIf(!windowAvailable)('desktop shell window e2e', () => {
     if (harnessHome !== undefined) {
       await rm(harnessHome, { recursive: true, force: true }).catch(() => undefined)
     }
+    if (pluginDir !== undefined) {
+      await rm(pluginDir, { recursive: true, force: true }).catch(() => undefined)
+    }
+  })
+
+  it('loads an unscoped out-of-tree profile plugin installed by dsh plugin add', async () => {
+    // The Electron-embedded loader resolves plugin imports from the vendored
+    // loader's own location; only the profile-anchored retry can find a
+    // package pnpm linked into the profile (any bare name — the documented
+    // out-of-tree flow, not just @deepseek-ai/*). The fixture's apply() sets
+    // a main-process global, so reading it from the main process proves the
+    // row was imported AND activated there.
+    const loaded = await electronApp.evaluate(
+      () => Boolean((globalThis as { __dshE2ePluginLoaded?: boolean }).__dshE2ePluginLoaded))
+    expect(loaded).toBe(true)
   })
 
   it('opens the sandboxed shell with the boot graph over the locked dsh://app origin', async () => {

@@ -111,6 +111,29 @@ function anchorPathSpec(argument: string, cwd: string): string {
   return `${prefix}${resolve(cwd, match.groups.path)}`
 }
 
+/** pnpm verbs that write the root manifest and therefore take the workspace-root check. */
+const ROOT_CHECKED_VERBS = new Set(['add', 'remove', 'update', 'unlink'])
+
+/**
+ * Compose the pnpm argument vector for one profile invocation. The profile is
+ * a one-package pnpm workspace (`initProfile` writes `pnpm-workspace.yaml` to
+ * carry the linker settings), so pnpm refuses manifest-mutating verbs inside
+ * it without `--workspace-root` (`ERR_PNPM_ADDING_TO_ROOT`). The flag is
+ * injected only when the workspace file actually exists: a profile without
+ * one is a plain package root, where `--workspace-root` itself would fail.
+ * The verb is the first argument — the shape this entry point forwards
+ * (`dsh plugin --profile <name> add <pkg>`), where no pnpm global flag
+ * precedes it.
+ * @param args - pnpm arguments verbatim from argv, verb-first.
+ * @param workspaceFile - whether the profile carries a pnpm-workspace.yaml.
+ * @returns the arguments to forward to pnpm.
+ */
+export function withWorkspaceRootFlag(args: readonly string[], workspaceFile: boolean): string[] {
+  const verb = args[0]
+  if (!workspaceFile || verb === undefined || !ROOT_CHECKED_VERBS.has(verb)) return [...args]
+  return ['-w', ...args]
+}
+
 /**
  * Run one `dsh plugin` invocation: init if needed, forward to pnpm, reconcile.
  * @param profile - the profile name.
@@ -126,7 +149,9 @@ export function runPlugin(profile: string, args: readonly string[]): number {
   const before = readProfileManifest(NAME, dir)
   // Windows resolves pnpm through its .cmd shim, which spawn() refuses
   // without a shell since the CVE-2024-27980 hardening.
-  const result = spawnSync('pnpm', args.map(argument => anchorPathSpec(argument, process.cwd())), {
+  const pnpmArgs = withWorkspaceRootFlag(args, existsSync(join(dir, 'pnpm-workspace.yaml')))
+    .map(argument => anchorPathSpec(argument, process.cwd()))
+  const result = spawnSync('pnpm', pnpmArgs, {
     cwd: dir,
     stdio: 'inherit',
     shell: process.platform === 'win32',

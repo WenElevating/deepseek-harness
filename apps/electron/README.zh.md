@@ -17,7 +17,7 @@ pnpm run dsh:electron                      # builds the app, then `electron .`
 
 `electron . --dsh-smoke` 用机器可校验的断言替代交互式生命周期：渲染进程必须看到注入的 `window.__DSH_BOOT__` 图、preload 的 `window.__DSH_IPC__` 桥与 `window.__DSH_WINDOW__` 标题栏桥，一个请求必须穿过 `dsh:fetch` IPC 通道，引导的 profile 必须未挂载 `webServer` 服务。进程为每个断言输出一行 `PASS`/`FAIL`，仅在全部通过时以 0 退出；对话框被抑制，自动化不会卡在模态框上。
 
-两个无 key 测试套件与之互补：`apps/electron/tests/electron-profile.snapshot.ts`（`pnpm run test:snapshot`）在纯 Node 中以 stub 的 `electron` 无头启动 profile 并固定一轮 transcript；`apps/electron/tests/window.e2e.ts`（web dist 构建后随 `pnpm run test:web`）经 Playwright 驱动真实窗口——解析后的 `webPreferences`、挂载的 `#root`、`window.__DSH_BOOT__`、被拒绝的外部导航；无显示环境自动跳过。
+两个无 key 测试套件与之互补：`apps/electron/tests/electron-profile.snapshot.ts`（`pnpm run test:snapshot`）在纯 Node 中以 stub 的 `electron` 无头启动 profile 并固定一轮 transcript；`apps/electron/tests/window.e2e.ts`（web dist 构建后随 `pnpm run test:web`）经 Playwright 驱动真实窗口——解析后的 `webPreferences`、挂载的 `#root`、`window.__DSH_BOOT__`、被拒绝的外部导航、无边框标题栏，以及一个经 `dsh plugin add` 装进隔离 home 的未 scope out-of-tree 插件（证明以 profile 为锚点的导入重试覆盖任意裸包名，而不只是 `@deepseek-ai/*`）；无显示环境自动跳过。
 
 ## 布局
 

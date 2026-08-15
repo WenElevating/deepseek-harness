@@ -17,7 +17,7 @@ The window loads `dsh://app/`; `Ctrl+Shift+I` / `F12` opens DevTools. Navigation
 
 `electron . --dsh-smoke` replaces interactive lifetime with machine-checked assertions: the renderer must see the injected `window.__DSH_BOOT__` graph, the preload's `window.__DSH_IPC__` bridge and `window.__DSH_WINDOW__` caption bridge, one request must cross the `dsh:fetch` IPC channel, and the booted profile must mount no `webServer` service. The process prints one `PASS`/`FAIL` line per assertion and exits 0 only when all pass; dialogs are suppressed so automation never blocks on a modal.
 
-Two keyless test suites complement it: `apps/electron/tests/electron-profile.snapshot.ts` (`pnpm run test:snapshot`) boots the profile headless in plain Node with `electron` stubbed and pins one transcript, and `apps/electron/tests/window.e2e.ts` (`pnpm run test:web`, after the web dist build) drives the real window through Playwright — resolved `webPreferences`, the mounted `#root`, `window.__DSH_BOOT__`, and refused external navigation; it self-skips on display-less hosts.
+Two keyless test suites complement it: `apps/electron/tests/electron-profile.snapshot.ts` (`pnpm run test:snapshot`) boots the profile headless in plain Node with `electron` stubbed and pins one transcript, and `apps/electron/tests/window.e2e.ts` (`pnpm run test:web`, after the web dist build) drives the real window through Playwright — resolved `webPreferences`, the mounted `#root`, `window.__DSH_BOOT__`, refused external navigation, the frameless caption, and one unscoped out-of-tree plugin installed into the isolated home through `dsh plugin add` (proving the profile-anchored import retry covers any bare package name, not just `@deepseek-ai/*`); it self-skips on display-less hosts.
 
 ## Layout
 
