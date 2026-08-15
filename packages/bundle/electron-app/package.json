@@ -41,7 +41,8 @@
   "dependencies": {
     "@deepseek-ai/dsh-web-app": "workspace:^",
     "@deepseek-ai/dsh-host-connection-electron": "workspace:^",
-    "@deepseek-ai/dsh-host-directory-picker-electron": "workspace:^"
+    "@deepseek-ai/dsh-host-directory-picker-electron": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-directory-picker-native": "workspace:^"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-invariants": "workspace:^",

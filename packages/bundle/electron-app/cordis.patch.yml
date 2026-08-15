@@ -4,6 +4,12 @@
 # connection row injects webRuntime, but prints no URL line and registers no
 # model-visible web-surface context — the desktop shell has no canonical URL.
 #
+# Disabling the adaptive `directory-picker` row drops BOTH faces of the
+# resolved interaction (the auto chooser mounts its backend and client surface
+# as one pair), so the Electron replacements restate the pair: the host dialog
+# backend plus the carrier-neutral native surface occupying ui-workspace's
+# directory-flow holes over the IPC carrier.
+#
 # A patch replaces the targeted row's whole `config`, so the web-runtime row
 # below restates every key it keeps: dropping `trustedHosts` leaves the
 # plugin's schema default, and with no webServer row mounted it provides the
@@ -26,6 +32,9 @@
 - insert:
     - id: directory-picker-electron
       name: '@deepseek-ai/dsh-host-directory-picker-electron'
+
+    - id: ui-directory-picker-native
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-native'
 
     - id: connection-electron
       name: '@deepseek-ai/dsh-host-connection-electron'

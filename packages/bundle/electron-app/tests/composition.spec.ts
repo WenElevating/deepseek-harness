@@ -35,6 +35,10 @@ describe('electron profile composition', () => {
     expect(rows.get('directory-picker')?.disabled).toBe(true)
     expect(rows.has('connection-electron')).toBe(true)
     expect(rows.has('directory-picker-electron')).toBe(true)
+    // auto 行成对挂载后端与客户端 surface，禁用它两个半边一起消失：Electron 替代品必须补齐配对的 surface，
+    // 否则侧边栏与空态页的目录流 hole 无人占用，添加工作区动作整体缺席（rail 里该行只剩空占位）。
+    expect(rows.has('ui-directory-picker-native')).toBe(true)
+    expect(rows.get('ui-directory-picker-native')?.disabled).not.toBe(true)
     expect(rows.has('connection')).toBe(true)  // 客户端半边行保留
     expect(rows.get('connection')?.disabled).not.toBe(true)  // IPC 载体认领的宿主半边所在行必须启用
   })
