@@ -114,6 +114,44 @@ function anchorPathSpec(argument: string, cwd: string): string {
 /** pnpm verbs that write the root manifest and therefore take the workspace-root check. */
 const ROOT_CHECKED_VERBS = new Set(['add', 'remove', 'update', 'unlink'])
 
+/** Known pnpm global options whose separate value may look like a command. */
+const PNPM_OPTIONS_WITH_VALUES = new Set([
+  '--changed-files-ignore-pattern',
+  '--config-dir',
+  '--dir',
+  '--filter',
+  '--global-bin-dir',
+  '--global-dir',
+  '--lockfile-dir',
+  '--loglevel',
+  '--registry',
+  '--reporter',
+  '--store-dir',
+  '--virtual-store-dir',
+  '--workspace-concurrency',
+  '--workspace-dir',
+  '-C',
+  '-F',
+])
+
+/**
+ * Find the pnpm command after recognized global options that precede it.
+ * @param args - pnpm arguments in their original order.
+ * @returns the first command token, or undefined for options-only input.
+ */
+function findPnpmCommand(args: readonly string[]): string | undefined {
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]
+    if (argument === undefined) continue
+    if (argument === '--') return args[index + 1]
+    if (!argument.startsWith('-')) return argument
+    const equals = argument.indexOf('=')
+    const option = equals === -1 ? argument : argument.slice(0, equals)
+    if (equals === -1 && PNPM_OPTIONS_WITH_VALUES.has(option)) index += 1
+  }
+  return undefined
+}
+
 /**
  * Compose the pnpm argument vector for one profile invocation. The profile is
  * a one-package pnpm workspace (`initProfile` writes `pnpm-workspace.yaml` to
@@ -121,15 +159,14 @@ const ROOT_CHECKED_VERBS = new Set(['add', 'remove', 'update', 'unlink'])
  * it without `--workspace-root` (`ERR_PNPM_ADDING_TO_ROOT`). The flag is
  * injected only when the workspace file actually exists: a profile without
  * one is a plain package root, where `--workspace-root` itself would fail.
- * The verb is the first argument — the shape this entry point forwards
- * (`dsh plugin --profile <name> add <pkg>`), where no pnpm global flag
- * precedes it.
- * @param args - pnpm arguments verbatim from argv, verb-first.
+ * Pnpm global options with a value may precede the command, and their values are not
+ * commands (`dsh plugin --profile <name> --reporter append-only add <pkg>`).
+ * @param args - pnpm arguments verbatim from argv, including global options.
  * @param workspaceFile - whether the profile carries a pnpm-workspace.yaml.
  * @returns the arguments to forward to pnpm.
  */
 export function withWorkspaceRootFlag(args: readonly string[], workspaceFile: boolean): string[] {
-  const verb = args[0]
+  const verb = findPnpmCommand(args)
   if (!workspaceFile || verb === undefined || !ROOT_CHECKED_VERBS.has(verb)) return [...args]
   return ['-w', ...args]
 }

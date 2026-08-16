@@ -20,4 +20,21 @@ describe('withWorkspaceRootFlag', () => {
   it('keeps trailing pnpm flags after the injected one', () => {
     expect(withWorkspaceRootFlag(['add', '-D', 'dsh-x'], true)).toEqual(['-w', 'add', '-D', 'dsh-x'])
   })
+
+  it('finds a root-checked verb after global options', () => {
+    expect(withWorkspaceRootFlag(['--reporter', 'append-only', 'add', 'dsh-x'], true))
+      .toEqual(['-w', '--reporter', 'append-only', 'add', 'dsh-x'])
+  })
+
+  it('skips values for global options while locating the verb', () => {
+    expect(withWorkspaceRootFlag(['--filter', 'add', 'install'], true))
+      .toEqual(['--filter', 'add', 'install'])
+    expect(withWorkspaceRootFlag(['--filter', 'add', 'add', 'dsh-x'], true))
+      .toEqual(['-w', '--filter', 'add', 'add', 'dsh-x'])
+  })
+
+  it('supports equals-form global options', () => {
+    expect(withWorkspaceRootFlag(['--reporter=append-only', 'update', 'dsh-x'], true))
+      .toEqual(['-w', '--reporter=append-only', 'update', 'dsh-x'])
+  })
 })
