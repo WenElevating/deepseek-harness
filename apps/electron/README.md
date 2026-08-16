@@ -9,7 +9,10 @@ The dsh desktop shell: an Electron main/preload pair over the `electron` profile
 ```sh
 pnpm run build:lib && pnpm run build:web   # workspace packages + web dist (once, and after changes)
 pnpm run dsh:electron                      # builds the app, then `electron .`
+pnpm run package:desktop                   # shareable portable win-x64 dir + zip under apps/electron/release
 ```
+
+`package:desktop` (win32 host only) deploys the production closure with `pnpm deploy --prod --legacy --config.node-linker=hoisted`, repairs the runtime packages that deploy prunes (several workspace packages classify runtime imports as devDependencies), copies the prebuilt Electron runtime with the exe renamed to `DeepSeek Harness.exe`, patches its icon and version metadata with rcedit, and zips the result. The deployed `resources/app` is flat real files — no symlink store — so the zip extracts to a runnable copy; each recipient's first run initializes the `electron` profile under their own `$DSH_HOME` (`%USERPROFILE%\.dsh`).
 
 The window loads `dsh://app/`; `Ctrl+Shift+I` / `F12` opens DevTools. Navigation away from the `dsh://app` surface is refused, and so is every new window.
 

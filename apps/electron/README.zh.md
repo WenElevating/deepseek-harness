@@ -9,7 +9,10 @@ dsh 桌面外壳：运行在 `electron` profile 之上的 Electron 主进程/pre
 ```sh
 pnpm run build:lib && pnpm run build:web   # workspace packages + web dist (once, and after changes)
 pnpm run dsh:electron                      # builds the app, then `electron .`
+pnpm run package:desktop                   # shareable portable win-x64 dir + zip under apps/electron/release
 ```
+
+`package:desktop`（仅 win32 宿主）用 `pnpm deploy --prod --legacy --config.node-linker=hoisted` 部署生产闭包，修复被 deploy 裁掉的运行时包（多个 workspace 包把运行时导入归类在 devDependencies），复制预构建的 Electron 运行时并把 exe 改名为 `DeepSeek Harness.exe`，用 rcedit 打上图标与版本元数据，最后压成 zip。部署出的 `resources/app` 是扁平真实文件——没有符号链接库——zip 解压即得可运行副本；每个接收者首次运行会在自己的 `$DSH_HOME`（`%USERPROFILE%\.dsh`）初始化 `electron` profile。
 
 窗口加载 `dsh://app/`；`Ctrl+Shift+I` / `F12` 打开 DevTools。离开 `dsh://app` 表面的导航会被拒绝，新窗口一律拒绝。
 
