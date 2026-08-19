@@ -15,6 +15,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { ApiProxy } from './api/index.ts'
 import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
 import {
@@ -59,6 +60,13 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * External settings namespaces this deployment may serve after each owning
+   * plugin registers with `exposeToClients: true`. Entries need not be mounted
+   * at startup; duplicate values are removed and malformed names reject load.
+   * @default []
+   */
+  exposedSettingsNamespaces?: string[]
 }
 
 /**
@@ -77,6 +85,9 @@ export class ApiProxyService extends Service implements ApiProxy {
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
     coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
+    exposedSettingsNamespaces: z.transform(z.array(z.string()), (namespaces) => {
+      return [...new Set(namespaces.map(namespace => String(settingsNamespace(namespace))))]
+    }).default([]),
   })
 
   readonly sessions: ApiProxy['sessions']
@@ -106,6 +117,9 @@ export class ApiProxyService extends Service implements ApiProxy {
       ...(config.coldBlankProbeMaxBytes === undefined
         ? {}
         : { coldBlankProbeMaxBytes: config.coldBlankProbeMaxBytes }),
+      ...(config.exposedSettingsNamespaces === undefined
+        ? {}
+        : { exposedSettingsNamespaces: config.exposedSettingsNamespaces }),
     })
     this.sessions = api.sessions
     this.subagents = api.subagents

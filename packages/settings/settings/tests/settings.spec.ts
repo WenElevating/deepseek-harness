@@ -172,6 +172,27 @@ describe('registration', () => {
     expect(ctx.settings.get(settingsNamespace('missing'))).toBeUndefined()
   })
 
+  it('requires explicit client exposure and revokes it with the registrant fiber', async () => {
+    const { ctx } = await boot()
+    const defaultNs = settingsNamespace('private-plugin')
+    const exposedNs = settingsNamespace('client-plugin')
+    ctx.settings.register(defaultNs, ThemeSchema)
+    expect(ctx.settings.isExposedToClients(defaultNs)).toBe(false)
+    expect(ctx.settings.isExposedToClients(settingsNamespace('missing'))).toBe(false)
+
+    const fiber = ctx.plugin({
+      inject: ['settings'],
+      apply: (child: Context) => {
+        child.settings.register(exposedNs, ThemeSchema, { exposeToClients: true })
+      },
+    })
+    await fiber
+    expect(ctx.settings.isExposedToClients(exposedNs)).toBe(true)
+
+    await fiber.dispose()
+    expect(ctx.settings.isExposedToClients(exposedNs)).toBe(false)
+  })
+
   it('hands out frozen resolved values', async () => {
     const { ctx } = await boot({ doc: { workspace: { retry: { attempts: 5 } } } })
     const scope = ctx.settings.register(settingsNamespace('workspace'), NestedSchema)
@@ -739,6 +760,22 @@ describe('installSettingsSection', () => {
       expect(changes).toBe(3)
     })
     expect(current()).toEqual({ theme: 'entry' })
+  })
+
+  it('passes the owner validation hook into the registered section', async () => {
+    const ctx = new Context()
+    const entry = { theme: 'entry' }
+    installSettingsSection(ctx, settingsNamespace('validated-helper'), HelperSchema, entry, {
+      setSource: () => {},
+      onChange: () => {},
+      validate: (value) => {
+        if (value.theme === 'blocked') throw new Error('blocked helper theme')
+      },
+    })
+    await ctx.plugin(MemorySettings)
+
+    await expect(ctx.settings.update(settingsNamespace('validated-helper'), { theme: 'blocked' }))
+      .rejects.toThrow('blocked helper theme')
   })
 
   it('stays silent when the consumer itself unloads', async () => {

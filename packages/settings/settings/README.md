@@ -8,8 +8,8 @@ User-settings Service Definition (`ctx.settings`). One provider holds a raw docu
 
 - `documentPath` — absolute path of the provider's user-editable file when it has one; non-file providers leave it `undefined`. Host configuration adapters derive availability from it, while browser protocols expose only a boolean capability and never a filesystem target.
 - `prepareDocument()` — return that path after making the document ready for a native editor. The base implementation returns `documentPath`; a file provider may materialize an absent document first.
-- `register(ns, schema, { base?, applies? })` — returns the owner `SettingsScope` (`get`/`watch`/`update`). The registration is an effect on the calling plugin's fiber: disposing that fiber removes the namespace and its observers. A stored section the schema rejects fails the registration itself; a duplicate namespace fails loud.
-- `describe(options?)` — one descriptor per namespace (`schema.toJSON()` envelope, resolved value, detached `base`/`user` layers, `applies`) for configuration surfaces; a field's presence in `user` is what marks it user-overridden. `describe({ redactSecrets: true })` strips `role('secret')` fields from every layer and adds the `secrets` slot list (`{ path, set }`); every wire surface MUST pass it, and the pure `redactSecrets(schema, value)` walker is exported for other wires.
+- `register(ns, schema, { base?, applies?, exposeToClients? })` — returns the owner `SettingsScope` (`get`/`watch`/`update`). The registration is an effect on the calling plugin's fiber: disposing that fiber removes the namespace and its observers. `exposeToClients` defaults to `false`; it permits, but never itself grants, deployment-configured browser exposure. A stored section the schema rejects fails the registration itself; a duplicate namespace fails loud.
+- `describe(options?)` — one descriptor per namespace (`schema.toJSON()` envelope, resolved value, detached `base`/`user` layers, `applies`) for same-process configuration surfaces; a field's presence in `user` is what marks it user-overridden. `describe({ redactSecrets: true })` strips `role('secret')` fields from every layer and adds the `secrets` slot list (`{ path, set }`). Browser protocols use `describeForWire()`: it redacts every returned layer, removes secret schema defaults, and omits a namespace whose schema cannot prove all secret paths safe. The pure `redactSecrets(schema, value)` walker remains available for non-wire callers.
 - `get(ns)` — resolved value, `undefined` while unregistered.
 - `update(ns, patch)` — deep-merges the plain-object patch into the user section only (never the `base`), validates the resolved candidate, persists through the provider, then commits. Patches may contain only JSON-compatible data: a Date, Map, BigInt, non-finite number, or circular reference rejects with its `$`-rooted path before anything persists (YAML/JSON storage would silently change such values on reload). Validation failure rejects before anything is persisted; a read-only provider (`writable: false`) rejects every write. Writes to one namespace are serialized in call order.
 - `replace(ns, section)` — sets the user section wholesale: the deliberate reset (`replace({})` re-inherits `base` and schema defaults).
@@ -17,6 +17,19 @@ User-settings Service Definition (`ctx.settings`). One provider holds a raw docu
 - Every write takes an optional `expectedRevision`. Each descriptor carries the namespace's `revision`, a monotonic counter over its RAW section; a write whose expectation no longer matches rejects with `SettingsConflictError` (`code: 'SETTINGS_CONFLICT'`, both revisions attached) instead of overwriting the writer that landed first. The write queue orders writes but cannot by itself tell a fresh writer from one holding a stale snapshot.
 - Resolved values are deep-frozen snapshots. Watchers receive `(next, prev)` after each commit: invocations of one callback run asynchronously, one at a time, in commit order (a slow stale invocation can never apply after a newer one), and failures — sync throws and async rejections alike — are contained. After a watch disposer returns, no further invocation starts (one already queued is skipped); an invocation already started still settles. The `settings/updated` event fans out one listener at a time, so one throwing listener cannot starve the rest; an async listener's rejection is contained and logged, which is why `INVARIANT`-coded failures rethrow only from synchronous listeners.
 - Service teardown refuses new writes and watcher starts, then drains every queued write and every started watcher invocation before disposal completes; a write whose registrant fiber was disposed mid-flight still reaches storage but commits and notifies nobody.
+
+## Browser Exposure
+
+An external settings namespace requires two independent approvals: its owner calls `ctx.settings.register(settingsNamespace('my-ui-plugin'), schema, { exposeToClients: true })`, then the deployment lists the same name in the API gateway config. The gateway keeps its product-owned and LLM-provider namespace rules; this additional list cannot widen them and accepts names for plugins that load later.
+
+```yaml
+- id: api-gateway
+  config:
+    exposedSettingsNamespaces:
+      - my-ui-plugin
+```
+
+`isExposedToClients(ns)` reports only a live registration's opt-in, so unloading the owner revokes it. Missing either approval, an unregistered namespace, or a schema `describeForWire()` cannot prove safe all answer `settings-not-exposed` at the gateway; none exposes the registry.
 
 ## Provider contract
 
@@ -41,5 +54,5 @@ No direct invalidation; a consumer that folds a settings value into the request 
 ## Known Limitations and Deferred Work
 
 - **Single user layer** — resolution knows schema defaults, one composition `base`, and one user document; it does not yet record which layer supplied each resolved value.
-- **`redactSecrets` is not a proven wire boundary** — the walker follows `object`/`dict`/`array`, so a `role('secret')` reached only through a union, intersection, or transform is returned VERBATIM with an empty `secrets` list, and `schema.toJSON()` carries a secret field's `.default(...)` to every client. Neither case is rejected; a schema whose secrets are not reachable through the walked containers must not be registered on a wire-exposed namespace. A fail-closed `describeForWire()` — one that refuses a schema it cannot prove safe, and sanitizes the serialized envelope and error text — is the real answer and is deferred.
+- **Wire schemas are deliberately narrower than local schemas** — `describeForWire()` admits unsupported node kinds only when their complete inspectable graph has no secret role. A union, intersection, transform, or other structure that reaches `role('secret')` is omitted instead of partially described, and the gateway rejects its browser writes. Keep browser-editable secrets in the supported `object`/`dict`/`array` paths or expose a non-secret reference instead.
 - **Cross-process concurrency is provider-defined** — the seam serializes writes per namespace in-process only; concurrent processes converge by provider behavior (the local file provider read-modify-writes under a writer lock, so namespaces survive concurrent writers and same-namespace conflicts resolve last-write-wins).

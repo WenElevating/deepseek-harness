@@ -1402,14 +1402,26 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'register<T>(ns: SettingsNamespace, schema: z<T>, options?: SettingsRegisterOptions<T>): SettingsScope<T>',
         description: 'Register a namespace schema and receive its owner scope. The registration is an effect on the calling plugin\'s fiber: disposing that fiber removes the namespace and its observers. An invalid stored section fails the registration itself — the earliest point where the schema can judge it.',
-        parameters: [{ name: 'ns', description: 'unique namespace; duplicate registration fails loud.' }, { name: 'schema', description: 'schemastery schema resolving this namespace\'s value.' }, { name: 'options', description: 'composition `base` layer and effect timing.' }],
+        parameters: [{ name: 'ns', description: 'unique namespace; duplicate registration fails loud.' }, { name: 'schema', description: 'schemastery schema resolving this namespace\'s value.' }, { name: 'options', description: 'composition layer, effect timing, and client-exposure opt-in.' }],
         returns: 'the owner scope for reads, observation, and updates.',
       },
       {
         signature: 'describe(options?: SettingsDescribeOptions): SettingsDescriptor[]',
         description: 'Describe every registered namespace for configuration surfaces, including the composition `base` and raw user layers so a form can mark which fields the user overrode (presence in `user`) and what a reset returns to.',
-        parameters: [{ name: 'options', description: 'redaction switch; wire surfaces must redact.' }],
+        parameters: [{ name: 'options', description: 'optional secret redaction for same-process callers.' }],
         returns: 'one descriptor per registered namespace, in registration order.',
+      },
+      {
+        signature: 'isExposedToClients(ns: SettingsNamespace): boolean',
+        description: 'Whether a live registrant explicitly permits deployment-configured client exposure. An absent namespace, including one whose fiber unloaded, is not exposed.',
+        parameters: [{ name: 'ns', description: 'registered namespace to inspect.' }],
+        returns: 'whether the live registrant opted into client exposure.',
+      },
+      {
+        signature: 'describeForWire(): SettingsDescriptor[]',
+        description: 'Describe only namespaces whose schema and values can safely reach a browser. Every returned value layer is secret-redacted and every secret schema default is removed; an unprovable schema is omitted completely.',
+        parameters: [],
+        returns: 'safe descriptors in registration order.',
       },
       {
         signature: 'get(ns: SettingsNamespace): unknown',
@@ -3975,7 +3987,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SettingsRegisterOptions',
-    declaration: 'export interface SettingsRegisterOptions<T> {\n    base?: Partial<T>;\n    applies?: SettingsApplies;\n    validate?: (value: T) => void;\n}',
+    declaration: 'export interface SettingsRegisterOptions<T> {\n    base?: Partial<T>;\n    applies?: SettingsApplies;\n    exposeToClients?: boolean;\n    validate?: (value: T) => void;\n}',
   },
   {
     name: 'SettingsUpdateSource',

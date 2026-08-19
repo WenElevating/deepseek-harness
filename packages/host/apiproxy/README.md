@@ -2,7 +2,20 @@
 
 English | [中文](README.zh.md)
 
-The API gateway shared by every client consists of the TypeScript API contract (`src/api/`, zero Node dependencies, importable from the browser), the fetch carrier pair (`src/fetch/`: `toFetchHandler` on the host side, `AbstractApiClient` plus platform subclasses on the client side), and the host-side implementation (`src/api-proxy.ts`: `createApiProxy` plus the default-exported `ApiProxyService` gateway plugin — config `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?}`, provides `ctx.apiProxy`). This package registers no routes; carriers such as HTTP wrap `ctx.apiProxy` themselves. The shipped Web composition lives in [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml), while its default Agent model selection belongs to [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md) in the base bundle.
+The API gateway shared by every client consists of the TypeScript API contract (`src/api/`, zero Node dependencies, importable from the browser), the fetch carrier pair (`src/fetch/`: `toFetchHandler` on the host side, `AbstractApiClient` plus platform subclasses on the client side), and the host-side implementation (`src/api-proxy.ts`: `createApiProxy` plus the default-exported `ApiProxyService` gateway plugin — config `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?, exposedSettingsNamespaces?}`, provides `ctx.apiProxy`). This package registers no routes; carriers such as HTTP wrap `ctx.apiProxy` themselves. The shipped Web composition lives in [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml), while its default Agent model selection belongs to [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md) in the base bundle.
+
+## External Settings Namespaces
+
+The product and configurable LLM provider namespaces retain their own gateway rules. An external plugin needs both its live `ctx.settings.register(settingsNamespace('my-ui-plugin'), schema, { exposeToClients: true })` declaration and this deployment configuration; the allowlist defaults to empty, deduplicates names, and does not require the owner to mount at gateway startup.
+
+```yaml
+- id: api-gateway
+  config:
+    exposedSettingsNamespaces:
+      - my-ui-plugin
+```
+
+The gateway always runs browser settings responses through `ctx.settings.describeForWire()`. A namespace with an unsafe schema is not described and cannot be written, even after both authorizations; every failed external authorization answers `settings-not-exposed`, as does an unregistered namespace.
 
 ## The shared Agent default (`agent-default-model` Settings section)
 

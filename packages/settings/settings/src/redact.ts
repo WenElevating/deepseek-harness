@@ -1,9 +1,7 @@
 /**
- * Structural secret redaction for settings values. `role('secret')` fields are
- * removed from a value before it crosses a wire boundary; a sidecar records
- * each schema-declared secret position and whether it currently holds a value,
- * so a configuration surface can render a write-only input without ever
- * receiving the secret itself.
+ * Structural secret redaction for settings values. The general value walker
+ * serves callers that control their schema traversal; `describeForWire()` adds
+ * the proof required before a browser receives a descriptor.
  * @module @deepseek-ai/dsh-settings/redact
  */
 
@@ -20,6 +18,12 @@ interface SchemaNode {
   dict?: Record<string, SchemaNode>
   /** `dict`/`array` element schema. */
   inner?: SchemaNode
+}
+
+/** Wire-safe redaction result, including a serialized schema with no secret defaults. */
+export interface WireRedactedSchema {
+  /** Serialized schema envelope safe for a configuration client. */
+  schema: unknown
 }
 
 /** One schema-declared secret position inside a redacted value. */
@@ -84,19 +88,18 @@ function walk(node: SchemaNode | undefined, value: unknown, path: string[], secr
       return value.map((entry, index) => walk(node.inner, entry, [...path, String(index)], secrets))
     }
     default:
-      // TODO(settings-wire-redaction): Fail closed instead — a secret reachable
-      // only through a union, intersection, or transform is returned verbatim
-      // here, with nothing recording that it was missed.
+      // This general helper leaves unknown structures intact. The browser path
+      // calls redactSchemaForWire(), which rejects one if it can reach a secret.
       return value
   }
 }
 
 /**
  * Remove every `role('secret')` field a schema declares from a value. The
- * walker follows `object`, `dict`, and `array` containers; a secret must be
- * declared directly on a field reachable through those containers (a secret
- * buried inside a union branch or transform is not reachable and must not be
- * modeled that way). The input is never mutated.
+ * walker follows `object`, `dict`, and `array` containers. It is not a browser
+ * safety proof for secrets behind other schema nodes; use
+ * `SettingsProvider.describeForWire()` for that path. The input is never
+ * mutated.
  * @param schema - live schemastery schema describing the value.
  * @param value - the value to strip; `undefined` yields an empty record with
  *   object-property secret slots still enumerated.
@@ -106,4 +109,69 @@ export function redactSecrets(schema: z<never>, value: unknown): RedactedValue {
   const secrets: RedactedSecret[] = []
   const stripped = walk(schema, value, [], secrets)
   return { value: stripped, secrets }
+}
+
+/** Whether this value is an object or callable schema node with inspectable own fields. */
+function isInspectable(value: unknown): value is Record<string, unknown> {
+  return (typeof value === 'object' && value !== null) || typeof value === 'function'
+}
+
+/** Find a secret role through every inspectable own field of an unsupported node. */
+function containsSecretRole(value: unknown, seen = new Set<object>()): boolean {
+  if (!isInspectable(value)) return false
+  if (seen.has(value)) return false
+  seen.add(value)
+  const meta = value.meta
+  if (isRecord(meta) && meta.role === 'secret') return true
+  return Object.values(value).some(child => containsSecretRole(child, seen))
+}
+
+/**
+ * Prove that the structural redactor covers every declared secret. Unknown
+ * schema node kinds remain usable only when their complete inspectable graph
+ * contains no secret role at all; otherwise their value never reaches a wire.
+ */
+function canRedactForWire(node: SchemaNode): boolean {
+  if (node.meta?.role === 'secret') return true
+  switch (node.type) {
+    case 'object':
+      return node.dict === undefined
+        ? !containsSecretRole(node)
+        : Object.values(node.dict).every(child => canRedactForWire(child))
+    case 'dict':
+    case 'array':
+      return node.inner === undefined ? !containsSecretRole(node) : canRedactForWire(node.inner)
+    default:
+      return !containsSecretRole(node)
+  }
+}
+
+/** Remove schema defaults from every write-only secret field in a wire envelope. */
+function redactSchemaDefaults(value: unknown, seen = new Set<object>()): void {
+  if (typeof value !== 'object' || value === null || seen.has(value)) return
+  seen.add(value)
+  const node = value as Record<string, unknown>
+  if (isRecord(node.meta) && node.meta.role === 'secret') delete node.meta.default
+  for (const child of Object.values(node)) redactSchemaDefaults(child, seen)
+}
+
+/**
+ * Produce the schema portion of a settings wire descriptor only when every
+ * declared secret has a redaction path. Secret defaults are removed because a
+ * schema envelope is also a browser response.
+ * @param schema - live schemastery schema for one settings namespace.
+ * @returns the safe serialized schema, or `undefined` when the schema cannot be proven safe.
+ */
+export function redactSchemaForWire(schema: z<unknown>): WireRedactedSchema | undefined {
+  try {
+    if (!canRedactForWire(schema)) return undefined
+    const serialized: unknown = structuredClone(schema.toJSON())
+    redactSchemaDefaults(serialized)
+    // structuredClone preserves cycles and values such as bigint that the
+    // browser response cannot encode, so prove JSON serialization separately.
+    if (typeof JSON.stringify(serialized) !== 'string') return undefined
+    return { schema: serialized }
+  } catch {
+    return undefined
+  }
 }

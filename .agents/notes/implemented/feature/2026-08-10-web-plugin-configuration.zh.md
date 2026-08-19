@@ -22,7 +22,7 @@ Status: implemented
 
 **提供方按次投影，而不是固化。** `web-search-deepseek` 交给提供方的是一个 thunk 而非 options 值，因此端点或模型的变更无需重新注册提供方即可作用于下一次搜索——重新注册会让 web seam 的提供方选择以闪断的形式被用户看到。
 
-**暴露仍是 Host 的白名单。** 这三个命名空间加入 `WEB_SETTINGS_NAMESPACES`；仅有注册依然不会跨越传输边界，而不在该名单中的命名空间会与未注册的命名空间得到完全相同的 `settings-not-exposed`。
+**产品暴露仍是 Host 白名单；外部暴露需要两项授权。** 这三个命名空间仍在 `WEB_SETTINGS_NAMESPACES` 中，因此产品行为不变。外部属主声明 `exposeToClients: true`，其部署再把 namespace 列入 `api-gateway.exposedSettingsNamespaces`；任一授权缺失都会与未注册 namespace 一样回答 `settings-not-exposed`。由部署控制的规则记录在[外部 settings 授权笔记](../architecture/2026-08-18-external-settings-deployment-authorization.md)中。
 
 **“可配置”标签页不认识任何命名空间。** `dsh-client-ui-settings-plugins` 拥有“插件”分区，通过 `settings.plugins.tab` 贡献自己的 `configurable` 页面，并在其中声明嵌套的 `settings.plugin.item` slot。它渲染注册进这个嵌套 slot 的卡片，因此带浏览器半侧的插件拥有自己的卡片与控件。每张卡片通过客户端 settings scope 绑定其命名空间，而该 scope 补上了表单所需的两样东西：原始 `user` 层——键的**存在**才标记字段被覆盖——以及把单个字段清回组装层的 `unset`。命名空间不可用时卡片什么都不渲染，因此未组装该插件的部署不会显示它的任何痕迹。
 
@@ -30,7 +30,8 @@ Status: implemented
 
 ## 备选方案
 
-- **用注册期的暴露声明取代白名单。** 这才是诚实的形状——命名空间的拥有方声明自己的暴露，在本仓库之外分发的插件也无需改动 `packages/host/apiproxy` 就能呈现自己的配置。之所以暂缓，是因为它会同时改变 seam 契约、全部现有注册点与防枚举语义；而且插件要暴露任意 schema，还得先有 fail-closed 的脱敏路径：目前只能经由 union 或 transform 抵达的 secret 会被原样返回。
+- **只有部署白名单，没有注册期声明。** 部署可能意外暴露一个本不打算有浏览器配置路径的第三方插件。属主声明仍是必需授权。
+- **只有注册期声明，没有部署配置。** 已组装插件就能扩大部署的浏览器配置访问权。profile 仍是必需授权。
 - **通用 schema 驱动的表单渲染器。** 再次否决，理由与 [web-config-plane 笔记](../architecture/2026-07-30-web-config-plane.md)所记一致：没有呈现词汇的字段真值产出的是无法使用的卡片。三个插件的手写控件成本相当而可读性更好，且该 slot 让第四个插件无需与本包协商。
 - **在本页编辑 preset 挂载的插件。** 超出范围，而且不只是「尚未实现」：preset 的行把配置内联在 `agent.cordis.yml` 中，且根本无法注册 settings 命名空间——同一 preset 挂载第二个会话时会因重复注册而失败。跨 preset 共享的用户层还会覆盖 preset 用来定义其 agent 身份的字段——人设文本、委派接线——而这些字段按设计就是各 preset 各自的。
 - **按执行器包各取一个命名空间，而非按能力命名的 `bash`。** 否决，因为被组装的执行器随平台不同，而设置文档不随平台不同：在 macOS 上设过超时的用户，到 Windows 上会悄无声息地失去它。
@@ -43,7 +44,7 @@ Status: implemented
 
 用户可以在设置页编辑 shell 的命令超时与输出上限、agent 循环的并行工具调用上限，以及搜索提供方的密钥、端点与单次请求预算，每个字段都标注是否由自己设定，并提供重置。
 
-有两项真实代价。加入第四个插件仍需要在 apiproxy 白名单里添一条，因此本页的覆盖面是 Host 的决定而非插件的决定。而 web 部署移入 agent 平面的那些插件——文件工具、技能、压缩、todo 工具——在这里一个都不出现，而它们恰恰是用户最可能期待找到的；它们的配置仍归 preset 编辑器。
+有两项真实代价。外部插件需要同时具有属主声明和部署 profile 条目，其卡片才能加载，因此客户端插件无法在任意 Host 上自行变得可见。而 web 部署移入 agent 平面的那些插件——文件工具、技能、压缩、todo 工具——在这里一个都不出现，而它们恰恰是用户最可能期待找到的；它们的配置仍归 preset 编辑器。
 
 bash 与 pwsh 执行器现在把 `config` 暴露为 source thunk 之上的 getter，而不再是 readonly 字段。所有读取点本就是按次读取，因此别无变化；但若某个子类在构造期捕获 `this.config`，就会悄然把组装条目钉死。
 

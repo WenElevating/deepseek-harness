@@ -14,6 +14,19 @@
 
 本分区声明根级列表 slot `settings.plugins.tab`，其标签会成为有序标签页。某个标签页首次被选择后会保持挂载，因此本地草稿与只读快照在切换标签页时不会丢失。本包注册自己的 `configurable` 贡献，由它声明嵌套的 `settings.plugin.item` 列表 slot。带浏览器半侧的插件把自己的卡片注册进这个嵌套 slot 并拥有其控件；本包既不枚举命名空间，也不渲染未被交给它的表单。两层排序都遵循贡献的 `order`。
 
+## 外部插件接入
+
+外部 Host 插件调用 `ctx.settings.register(settingsNamespace('my-ui-plugin'), schema, { exposeToClients: true })`。其 profile 还必须配置 API gateway；只在一处声明 namespace 会让卡片保持不可用。
+
+```yaml
+- id: api-gateway
+  config:
+    exposedSettingsNamespaces:
+      - my-ui-plugin
+```
+
+Client 插件绑定 `ctx.settingsScope.bind({ namespace: 'my-ui-plugin' })`，把自己的手写卡片贡献给 `settings.plugin.item`，并在该 scope 没有 descriptor 时渲染不可用状态。它拥有控件与写入行为；本包只提供标签页和卡片 slot。
+
 ## 写入
 
 卡片暂存用户输入，只有用户保存时才写入。每个控件渲染的都是暂存文本，因此屏幕上所见即保存后所存；**放弃修改**丢弃这些草稿，持有未保存修改的卡片即使收起也会在标题上标明。重置暂存的是组装默认值而非立即写入；字段不接受的草稿会阻塞保存，而不是被丢弃。
@@ -35,6 +48,6 @@
 ## 已知限制与暂缓事项
 
 - **只有宿主平面的插件会出现**——由 agent preset 挂载的插件把配置内联在该 preset 的 `agent.cordis.yml` 中，且根本无法注册 settings 命名空间（同一 preset 挂载第二个会话时会因重复注册而失败），因此本分区不会列出它。编辑那些值仍是 preset 编辑器的职责。
-- **暴露是 Host 的白名单，而非插件的声明**——不在 api-proxy 白名单中的命名空间，即便其拥有方已注册，也只会得到 `settings-not-exposed`，因此在本仓库之外分发的插件无法在不改动 `packages/host/apiproxy` 的前提下让自己的配置出现在这里。
+- **暴露有两项授权**——外部 namespace 需要属主的 `exposeToClients: true` 声明和部署的 `api-gateway.exposedSettingsNamespaces` 条目。两项权限中任何一项都不能让插件单独扩大部署的浏览器配置访问权。
 - **shell 卡片跟随被组装的执行器**——POSIX 与 PowerShell 两个执行器家族共用 `bash` 命名空间，因为一个宿主只组装其中之一，所以被服务的 schema 随平台不同（PowerShell 多出 `pwshPath`），尽管卡片在两者下编辑的都是同样两个字段；而两者都不组装的部署不会显示这张卡片。
 - **空态数的是已注册卡片，不是可见卡片**——命名空间未被本部署暴露的卡片什么都不渲染，但仍计入数量，因此一个都不暴露的部署看到的是空列表而非那行空态文案。该计数还只读取一次，因为渲染器会缓存根级 entry 的 inject face；之后注册的卡片不会让它变大。

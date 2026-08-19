@@ -14,6 +14,19 @@ The first batch covers the shell executor (`bash`), the agent loop's tool-call p
 
 The section declares `settings.plugins.tab`, a root list slot whose labels become ordered tabs. It keeps a tab mounted after its first selection, so local drafts and read-only snapshots survive tab switches. The package registers its own `configurable` contribution, which declares the nested `settings.plugin.item` list slot. A plugin that ships a browser half registers its own card into that nested slot and owns its controls; this package neither enumerates namespaces nor renders a form it was not given. Both levels follow the contribution's `order`.
 
+## External Plugin Setup
+
+An external Host plugin registers `ctx.settings.register(settingsNamespace('my-ui-plugin'), schema, { exposeToClients: true })`. Its profile must also configure the API gateway; declaring the namespace in only one place leaves the card unavailable.
+
+```yaml
+- id: api-gateway
+  config:
+    exposedSettingsNamespaces:
+      - my-ui-plugin
+```
+
+The Client plugin binds `ctx.settingsScope.bind({ namespace: 'my-ui-plugin' })`, contributes its hand-written card to `settings.plugin.item`, and renders an unavailable state when that scope has no descriptor. It owns the controls and writing behavior; this package only provides the tab and card slot.
+
 ## Writes
 
 A card stages what the user types and writes it only when they save. Each control renders staged text, so what is on screen is exactly what a save would store; **Discard** drops the drafts, and a card holding unsaved edits says so on its header even while collapsed. A reset stages the composed default rather than writing immediately, and a draft the field does not accept blocks the save instead of being dropped.
@@ -35,6 +48,6 @@ None; this package neither assembles nor sends a provider request.
 ## Known Limitations and Deferred Work
 
 - **Only host-plane plugins appear** — a plugin an agent preset mounts carries its configuration inline in that preset's `agent.cordis.yml` and cannot register a settings namespace at all (a second session mounting the same preset would fail on a duplicate registration), so this section lists nothing for it. Editing those values remains the preset editor's job.
-- **Exposure is a Host allowlist, not a plugin declaration** — a namespace absent from the api-proxy's allowlist answers `settings-not-exposed` even when its owner registered it, so a plugin distributed outside this repository cannot surface its own configuration here without a change in `packages/host/apiproxy`.
+- **Exposure has two authorities** — an external namespace needs the owner’s `exposeToClients: true` declaration and the deployment’s `api-gateway.exposedSettingsNamespaces` entry. Neither permission lets a plugin increase a deployment's browser configuration access alone.
 - **The shell card follows the composed executor** — the POSIX and PowerShell executor families share the `bash` namespace because a host composes exactly one of them, so the served schema differs by platform (PowerShell adds `pwshPath`) even though the card edits the same two fields on both, and a deployment composing neither shows no card.
 - **The empty line counts registered cards, not visible ones** — a card whose namespace this deployment does not expose renders nothing, but still counts, so a deployment that exposes none shows an empty list rather than the empty line. The count is also read once, because the renderer caches a root entry's inject face; a card registered later does not raise it.

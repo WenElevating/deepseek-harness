@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { redactSchemaForWire } from '../src/redact.ts'
 import { redactSecrets, settingsNamespace } from '../src/index.ts'
 import { MemorySettings } from './memory.ts'
 
@@ -164,5 +165,85 @@ describe('describe() layers and redaction', () => {
     expect(descriptor?.secrets).toEqual([{ path: ['apiKey'], set: true }])
     const [verbatim] = ctx.settings.describe()
     expect(verbatim?.value).toEqual({ apiKey: 'user-key', baseURL: 'https://user' })
+  })
+
+  it('fails closed for secret schemas it cannot structurally redact on the wire', async () => {
+    const ctx = await boot({
+      adapter: { apiKey: 'stored-secret', baseURL: 'https://safe.example' },
+      'union-secret': { apiKey: 'union-secret' },
+      'transform-secret': { apiKey: 'transform-secret' },
+    })
+    const Safe = z.object({
+      apiKey: z.string().role('secret').default('schema-secret'),
+      baseURL: z.string(),
+    })
+    const UnionSecret = z.union([
+      z.object({ apiKey: z.string().role('secret') }),
+      z.object({ enabled: z.boolean() }),
+    ])
+    const TransformSecret = z.transform(
+      z.object({ apiKey: z.string().role('secret') }),
+      value => value,
+    )
+    ctx.settings.register(NS, Safe)
+    ctx.settings.register(settingsNamespace('union-secret'), UnionSecret)
+    ctx.settings.register(settingsNamespace('transform-secret'), TransformSecret)
+
+    const wire = ctx.settings.describeForWire()
+    expect(wire.map(descriptor => String(descriptor.ns))).toEqual(['adapter'])
+    expect(wire[0]?.value).toEqual({ baseURL: 'https://safe.example' })
+    expect(JSON.stringify(wire)).not.toContain('stored-secret')
+    expect(JSON.stringify(wire)).not.toContain('schema-secret')
+    expect(JSON.stringify(wire)).not.toContain('union-secret')
+    expect(JSON.stringify(wire)).not.toContain('transform-secret')
+  })
+
+  it('accepts secret-free incomplete schema graphs but rejects cyclic wire envelopes', () => {
+    const schema = (node: object, envelope: object): z<unknown> => ({
+      ...node,
+      toJSON: () => envelope,
+    }) as unknown as z<unknown>
+
+    for (const node of [
+      { type: 'object' },
+      { type: 'dict' },
+      { type: 'array' },
+      { type: 'dict', inner: { type: 'string' } },
+      { type: 'array', inner: { type: 'string' } },
+    ]) {
+      expect(redactSchemaForWire(schema(node, node))).toEqual({ schema: node })
+    }
+
+    const cyclicNode: Record<string, unknown> = { type: 'union', value: 'safe' }
+    cyclicNode.self = cyclicNode
+    const cyclicEnvelope: Record<string, unknown> = { type: 'union' }
+    cyclicEnvelope.self = cyclicEnvelope
+    const result = redactSchemaForWire(schema(cyclicNode, cyclicEnvelope))
+    expect(result).toBeUndefined()
+
+    const undefinedEnvelope = {
+      type: 'string',
+      toJSON: () => undefined,
+    } as unknown as z<unknown>
+    expect(redactSchemaForWire(undefinedEnvelope)).toBeUndefined()
+  })
+
+  it('omits one descriptor when its schema or value cannot reach the JSON wire', async () => {
+    const ctx = await boot()
+    const brokenSchema = Object.assign(
+      (value: unknown) => value ?? {},
+      { toJSON: () => { throw new Error('schema cannot be serialized') } },
+    ) as unknown as z<unknown>
+    const opaqueValueSchema = Object.assign(
+      (value: unknown) => value ?? { value: () => {} },
+      { toJSON: () => ({ type: 'object' }) },
+    ) as unknown as z<{ value: unknown }>
+    ctx.settings.register(settingsNamespace('broken-schema'), brokenSchema)
+    ctx.settings.register(settingsNamespace('broken-value'), opaqueValueSchema, {
+      base: { value: () => {} },
+    })
+    ctx.settings.register(settingsNamespace('safe-wire'), z.object({ value: z.string() }))
+
+    expect(ctx.settings.describeForWire().map(descriptor => String(descriptor.ns))).toEqual(['safe-wire'])
   })
 })

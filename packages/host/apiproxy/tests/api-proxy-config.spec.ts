@@ -24,6 +24,7 @@ import type { RpcRequest, RpcResponse } from '../src/api/rpc.ts'
 import { RpcId } from '../src/api/rpc.ts'
 import { AGENT_DEFAULT_MODEL_SETTINGS_NAMESPACE } from '@deepseek-ai/dsh-agent-default-model'
 import { createApiProxy } from '../src/api-proxy.ts'
+import { toFetchHandler } from '../src/fetch/handler.ts'
 
 const DEFAULTS = { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' }
 
@@ -156,6 +157,7 @@ class BrokenCatalogAdapter extends CatalogAdapter {
 }
 
 const NS = settingsNamespace('llm-deepseek')
+const EXTERNAL_NS = settingsNamespace('external-plugin')
 
 const AdapterConfig = z.object({
   apiKey: z.string().role('secret'),
@@ -408,6 +410,184 @@ describe('settings domain', () => {
     expect(ctx.settings.describe().find(d => String(d.ns) === 'some-other-plugin')?.value).toEqual({})
   })
 
+  it('requires both deployment and plugin authorization before serving an external namespace', async () => {
+    const ctx = await harness()
+    const undeclared = settingsNamespace('deployment-only')
+    const declared = settingsNamespace('plugin-only')
+    ctx.settings.register(undeclared, z.object({ endpoint: z.string() }))
+    ctx.settings.register(declared, z.object({ endpoint: z.string() }), { exposeToClients: true })
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(undeclared), 'unregistered-plugin'],
+    })
+
+    expect(expectOk(await api.settings.describe(request({}))).namespaces).toEqual([])
+    for (const ns of [String(undeclared), String(declared), 'unregistered-plugin']) {
+      for (const response of [
+        await api.settings.update(request({ ns, patch: { endpoint: 'https://blocked.example' } })),
+        await api.settings.replace(request({ ns, section: { endpoint: 'https://blocked.example' } })),
+        await api.settings.mutate(request({ ns, ops: [{ op: 'set', path: ['endpoint'], value: 'https://blocked.example' }] })),
+      ]) {
+        expect(expectErr(response).code).toBe('settings-not-exposed')
+      }
+    }
+  })
+
+  it('serves a safely serializable external namespace after both authorizations', async () => {
+    const ctx = await harness()
+    ctx.settings.register(EXTERNAL_NS, z.object({ endpoint: z.string(), apiKey: z.string().role('secret') }), {
+      exposeToClients: true,
+    })
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(EXTERNAL_NS)],
+    })
+
+    const opened = expectOk(await api.settings.describe(request({}))).namespaces[0]!
+    expect(opened.ns).toBe(String(EXTERNAL_NS))
+    expect(opened.secrets).toEqual([{ path: ['apiKey'], set: false }])
+    const updated = expectOk(await api.settings.update(request({
+      ns: String(EXTERNAL_NS),
+      patch: { endpoint: 'https://configured.example', apiKey: 'outbound-only' },
+      expectedRevision: opened.revision,
+    })))
+    expect(updated.value).toEqual({ endpoint: 'https://configured.example' })
+    expect(expectErr(await api.settings.mutate(request({
+      ns: String(EXTERNAL_NS),
+      ops: [{ op: 'set', path: ['endpoint'], value: 'https://stale.example' }],
+      expectedRevision: opened.revision,
+    }))).code).toBe('settings-conflict')
+    const replaced = expectOk(await api.settings.replace(request({
+      ns: String(EXTERNAL_NS),
+      section: { endpoint: 'https://replaced.example' },
+      expectedRevision: updated.revision,
+    })))
+    expect(replaced.value).toEqual({ endpoint: 'https://replaced.example' })
+  })
+
+  it('rechecks external authorization after a write owner is replaced', async () => {
+    const ctx = await harness()
+    const owner = ctx.plugin({
+      inject: ['settings'],
+      apply: (child: Context) => {
+        child.settings.register(EXTERNAL_NS, z.object({ endpoint: z.string() }), { exposeToClients: true })
+      },
+    })
+    await owner
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(EXTERNAL_NS)],
+    })
+    const started = Promise.withResolvers<boolean>()
+    const release = Promise.withResolvers<boolean>()
+    const update = vi.spyOn(ctx.settings, 'update').mockImplementation(async () => {
+      started.resolve(true)
+      await release.promise
+    })
+
+    const pending = api.settings.update(request({
+      ns: String(EXTERNAL_NS),
+      patch: { endpoint: 'https://old-owner.example' },
+    }))
+    await started.promise
+    await owner.dispose()
+    const replacement = ctx.plugin({
+      inject: ['settings'],
+      apply: (child: Context) => {
+        child.settings.register(EXTERNAL_NS, z.object({ endpoint: z.string() }))
+      },
+    })
+    await replacement
+    release.resolve(true)
+
+    const error = expectErr(await pending)
+    expect(error.code).toBe('settings-not-exposed')
+    update.mockRestore()
+    await replacement.dispose()
+  })
+
+  it('does not echo submitted secret values in settings rejection messages', async () => {
+    const ctx = await harness()
+    const ns = settingsNamespace('secret-validation')
+    ctx.settings.register(ns, z.object({ apiKey: z.string().required(false) }), {
+      exposeToClients: true,
+      validate: (value) => {
+        if (value.apiKey === 'submitted-secret') throw new Error(`secret rejected: ${value.apiKey}`)
+      },
+    })
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(ns)],
+    })
+
+    const error = expectErr(await api.settings.update(request({
+      ns: String(ns),
+      patch: { apiKey: 'submitted-secret' },
+    })))
+    expect(error.code).toBe('settings-rejected')
+    expect(error.message).toBe('settings update rejected')
+    expect(error.message).not.toContain('submitted-secret')
+  })
+
+  it('omits a cyclic external schema through the fetch wire', async () => {
+    const ctx = await harness()
+    const ns = settingsNamespace('cyclic-external')
+    const envelope: Record<string, unknown> = { type: 'union' }
+    envelope.self = envelope
+    const schema = Object.assign(
+      (value: unknown) => value ?? {},
+      { toJSON: () => envelope },
+    ) as unknown as z<unknown>
+    ctx.settings.register(ns, schema, { exposeToClients: true })
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(ns)],
+    })
+
+    const response = await toFetchHandler(api).fetch(new Request('http://host/api/settings.describe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: 'cyclic-describe',
+        method: 'settings.describe',
+        payload: {},
+      }),
+    }))
+    expect(response.status).toBe(200)
+    const body = await response.json() as {
+      result: { ok: boolean; value?: { namespaces: unknown[] } }
+    }
+    expect(body.result.ok).toBe(true)
+    expect(body.result.value?.namespaces).toEqual([])
+  })
+
+  it('refuses an authorized external namespace whose secret redaction cannot be proven', async () => {
+    const ctx = await harness()
+    const unsafe = settingsNamespace('unsafe-external')
+    ctx.settings.register(unsafe, z.union([
+      z.object({ endpoint: z.string(), apiKey: z.string().role('secret') }),
+      z.object({ disabled: z.boolean() }),
+    ]), { exposeToClients: true })
+    const api = createApiProxy(ctx, {
+      ...DEFAULTS,
+      exposedSettingsNamespaces: [String(unsafe)],
+    })
+
+    expect(expectOk(await api.settings.describe(request({}))).namespaces).toEqual([])
+    for (const response of [
+      await api.settings.update(request({ ns: String(unsafe), patch: { endpoint: 'https://blocked.example' } })),
+      await api.settings.replace(request({ ns: String(unsafe), section: { endpoint: 'https://blocked.example' } })),
+      await api.settings.mutate(request({
+        ns: String(unsafe),
+        ops: [{ op: 'set', path: ['endpoint'], value: 'https://blocked.example' }],
+      })),
+    ]) {
+      expect(expectErr(response).code).toBe('settings-not-exposed')
+    }
+    expect(ctx.settings.describe()[0]?.value).toBeUndefined()
+  })
+
   it('serves product preference namespaces without invalidating the model catalog', async () => {
     const ctx = await harness()
     ctx.settings.register(settingsNamespace('ui-onboarding'), z.object({ welcomeNoticeVersion: z.string() }))
@@ -574,7 +754,7 @@ describe('settings domain', () => {
     expect(value.writable).toBe(false)
     const error = expectErr(await api.settings.update(request({ ns: 'llm-deepseek', patch: {} })))
     expect(error.code).toBe('settings-rejected')
-    expect(error.message).toContain('read-only')
+    expect(error.message).toBe('settings update rejected')
   })
 })
 

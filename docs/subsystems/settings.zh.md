@@ -17,7 +17,7 @@ type SettingsNamespace = Branded<'SettingsNamespace'>
 
 ## 注册
 
-注册把 schemastery schema 绑定到调用方插件 fiber 上的 namespace——dispose（资源释放）该 fiber 即移除 namespace 及其观察者。options 携带组合层、owner 的生效时机，以及一个可选的、用于校验 schema 表达不了的约束的钩子。
+注册把 schemastery schema 绑定到调用方插件 fiber 上的 namespace——dispose（资源释放）该 fiber 即移除 namespace 及其观察者。options 携带组合层、owner 的生效时机、可选的部署暴露 opt-in，以及一个可选的、用于校验 schema 表达不了的约束的钩子。
 
 ```ts type-equiv
 /** Registration options beyond the namespace schema. */
@@ -26,6 +26,8 @@ interface SettingsRegisterOptions<T> {
   base?: Partial<T>
   /** Owner's effect timing, surfaced to configuration UIs; defaults to `live`. */
   applies?: SettingsApplies
+  /** Permit a deployment to serve this namespace to configuration clients; defaults to false. */
+  exposeToClients?: boolean
   /**
    * Reject a resolved section the owner could not act on, for constraints its
    * schema cannot express — a cross-field requirement, or one field's validity
@@ -52,6 +54,8 @@ interface SettingsRegisterOptions<T> {
 `validate` 在 schema 接纳该值之后运行，因此它看到的默认值和组合 base 与 owner 实际看到的完全一致。`dsh-llm-pi-ai` 用它在写入处拒绝自己无法服务的提供方 profile，而不是先存下来、再让该 namespace 下每条路由失效。
 
 `applies` 是 UI 提示而非机制：`restart` 的 owner 只是从不 watch，其值在构造期读取一次，配置界面可为待生效变更加标。
+
+`exposeToClients` 只允许由部署控制的浏览器配置路径，不会让 namespace 公开。`isExposedToClients(ns)` 只在该 owner 注册仍然存活时报告 opt-in。API gateway 还会在 `exposedSettingsNamespaces` 中单独列出外部名称，因此未注册、缺少任一授权，或协议 schema 不安全的 namespace 对浏览器客户端都无法区分。
 
 ```ts type-equiv
 /** When a namespace's changes take effect for its owner. */
@@ -95,7 +99,7 @@ interface SettingsScope<T> {
 
 ## 描述符
 
-`describe()` 为配置界面序列化每个已注册 namespace：schemastery 的 `toJSON()` 封装结构驱动 schema 渲染的表单，解析值填充表单，分离出的 `base`/`user` 层让表单按字段是否出现在 user 层标注「用户已覆盖」。`describe({ redactSecrets: true })`——每个对外传输接口都必须传入——从三层剥离 `role('secret')` 字段并枚举其 `{path, set}` slot，页面因此能渲染只写输入框而永远收不到机密值。
+`describe()` 为进程内配置界面序列化每个已注册 namespace：schemastery 的 `toJSON()` 封装结构驱动 schema 渲染的表单，解析值填充表单，分离出的 `base`/`user` 层让表单按字段是否出现在 user 层标注「用户已覆盖」。`describe({ redactSecrets: true })` 从三层剥离 `role('secret')` 字段并枚举其 `{path, set}` slot。浏览器代码使用 `describeForWire()`；它还会从 schema 封装中移除 secret 默认值，且只有能证明每个 secret 都有结构化脱敏路径时才返回 namespace。
 
 ```ts type-equiv
 /** One registered namespace as surfaced to configuration UIs. */
@@ -120,7 +124,7 @@ interface SettingsDescriptor {
   user?: unknown
   /** Owner's declared effect timing. */
   applies: SettingsApplies
-  /** Schema-declared secret positions; present only under `redactSecrets`. */
+  /** Schema-declared secret positions; present in redacted descriptors. */
   secrets?: RedactedSecret[]
 }
 ```
@@ -145,8 +149,9 @@ type SettingsPathOp =
 interface SettingsDescribeOptions {
   /**
    * Strip `role('secret')` fields from `value`/`base`/`user` and enumerate
-   * them in each descriptor's `secrets`. Every wire surface MUST pass this;
-   * the verbatim default exists for same-process configuration UIs only.
+   * them in each descriptor's `secrets`. Browser-facing code MUST use
+   * {@link SettingsProvider.describeForWire}; this option serves same-process
+   * callers that already control the schema they render.
    */
   redactSecrets?: boolean
 }
@@ -191,7 +196,7 @@ prepareDocument(): Promise<string | undefined>
  * registration itself — the earliest point where the schema can judge it.
  * @param ns - unique namespace; duplicate registration fails loud.
  * @param schema - schemastery schema resolving this namespace's value.
- * @param options - composition `base` layer and effect timing.
+ * @param options - composition layer, effect timing, and client-exposure opt-in.
  * @returns the owner scope for reads, observation, and updates.
  */
 register<T>(ns: SettingsNamespace, schema: z<T>, options?: SettingsRegisterOptions<T>): SettingsScope<T>
@@ -200,10 +205,27 @@ register<T>(ns: SettingsNamespace, schema: z<T>, options?: SettingsRegisterOptio
  * Describe every registered namespace for configuration surfaces, including
  * the composition `base` and raw user layers so a form can mark which fields
  * the user overrode (presence in `user`) and what a reset returns to.
- * @param options - redaction switch; wire surfaces must redact.
+ * @param options - optional secret redaction for same-process callers.
  * @returns one descriptor per registered namespace, in registration order.
  */
 describe(options?: SettingsDescribeOptions): SettingsDescriptor[]
+
+/**
+ * Whether a live registrant explicitly permits deployment-configured client
+ * exposure. An absent namespace, including one whose fiber unloaded, is not
+ * exposed.
+ * @param ns - registered namespace to inspect.
+ * @returns whether the live registrant opted into client exposure.
+ */
+isExposedToClients(ns: SettingsNamespace): boolean
+
+/**
+ * Describe only namespaces whose schema and values can safely reach a
+ * browser. Every returned value layer is secret-redacted and every secret
+ * schema default is removed; an unprovable schema is omitted completely.
+ * @returns safe descriptors in registration order.
+ */
+describeForWire(): SettingsDescriptor[]
 
 /**
  * Read one registered namespace's resolved value.
@@ -252,7 +274,7 @@ async replace(ns: SettingsNamespace, section: object, expectedRevision?: number)
 async mutate(ns: SettingsNamespace, ops: readonly SettingsPathOp[], expectedRevision?: number): Promise<void>
 ```
 
-Source: [`packages/settings/settings/src/index.ts:350`](../../packages/settings/settings/src/index.ts)
+Source: [`packages/settings/settings/src/index.ts:355`](../../packages/settings/settings/src/index.ts)
 
 <a id="settings-events"></a>
 

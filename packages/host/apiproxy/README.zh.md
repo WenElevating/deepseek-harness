@@ -2,7 +2,20 @@
 
 [English](README.md) | 中文
 
-所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md)。
+所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?, exposedSettingsNamespaces?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md)。
+
+## 外部 Settings Namespace
+
+产品持有和可配置 LLM 提供方 namespace 保留各自的网关规则。外部插件需要同时具备仍在运行的 `ctx.settings.register(settingsNamespace('my-ui-plugin'), schema, { exposeToClients: true })` 声明和以下部署配置；allowlist 默认为空、会去重名称，也不要求属主在网关启动时已挂载。
+
+```yaml
+- id: api-gateway
+  config:
+    exposedSettingsNamespaces:
+      - my-ui-plugin
+```
+
+网关总是通过 `ctx.settings.describeForWire()` 生成浏览器 settings 响应。schema 不安全的 namespace 即使具备两项授权，也不会被描述或接受写入；每一种失败的外部授权都与未注册 namespace 一样回答 `settings-not-exposed`。
 
 ## 共享 Agent 默认值（`agent-default-model` Settings 分节）
 

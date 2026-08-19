@@ -116,12 +116,9 @@ const DEFAULT_MAX_MESSAGES = 50
 /**
  * Non-model settings namespaces intentionally served to the Web client. The
  * plugin-owned entries (`agent-loop`, `bash`, `web-search-deepseek`) are the
- * host-plane sections the plugin configuration page edits; a namespace absent
- * here answers `settings-not-exposed` even when its owner registered it, so
- * adding a section to that page is a decision made here rather than by the
- * registering plugin. Moving that declaration to `settings.register()`, so a
- * plugin can expose its own configuration without a change in this package,
- * is deferred work.
+ * host-plane sections the plugin configuration page edits. They remain product
+ * choices; external plugin namespaces use the deployment allowlist plus their
+ * own explicit Settings registration declaration instead.
  */
 const WEB_SETTINGS_NAMESPACES = [
   'agent-loop', 'shell', 'locale', 'permission', 'ui-conversation', 'ui-theme', 'web-search-deepseek',
@@ -659,6 +656,8 @@ export interface ApiProxyDefaults {
   sessionExportCompressionLevel?: SessionLogCompressionLevel
   /** Maximum artifact size eligible for one cold blankness read. */
   coldBlankProbeMaxBytes?: number
+  /** External namespaces this deployment permits after the owner opts in. */
+  exposedSettingsNamespaces?: readonly string[]
   /**
    * Whether handing a path to the native opener can work at all — the
    * `hasDocument` capability the preset roster reports, and the switch
@@ -1108,6 +1107,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
+  const deploymentExposedSettingsNamespaces = new Set(defaults.exposedSettingsNamespaces ?? [])
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -1946,9 +1946,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
   /**
    * The settings namespaces this proxy serves: configurable model providers
-   * plus the small explicit Web preference and product-owned allowlists. The
-   * settings seam remains general; a future registration does not become
-   * remotely readable or writable by default.
+   * plus the small explicit Web preference and product-owned allowlists.
+   * External namespaces additionally require both deployment and registrant
+   * authorization, evaluated where each request reaches the seam.
    */
   function exposedNamespaces(): Set<string> {
     const exposed = modelProviderNamespaces()
@@ -1969,9 +1969,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   /**
    * Run one settings write (merge or wholesale replace) and acknowledge with
    * the namespace's new redacted view. A namespace outside the configuration
-   * boundary is refused before the seam is touched; every seam refusal —
-   * unknown or invalid namespace, read-only provider, schema validation,
-   * storage — becomes one `settings-rejected` carrying the seam's own message.
+   * boundary is refused before the seam is touched. Provider, schema, and
+   * storage failures become one `settings-rejected` without echoing input;
+   * revision conflicts retain their compare-and-swap details.
    */
   async function settingsWrite(
     request: RpcRequest<unknown>,
@@ -1994,7 +1994,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       }
       return err(request, {
         code: 'settings-rejected',
-        message: error instanceof Error ? error.message : String(error),
+        message: `settings ${mode} rejected`,
         details: { ns },
       })
     }
@@ -2006,7 +2006,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       // in the exposed set either, so naming the real fault costs no ground.
       return rejected(error)
     }
-    if (!exposedNamespaces().has(ns)) return notExposed(request, ns)
+    const descriptor = settings.describeForWire().find(candidate => candidate.ns === branded)
+    const deploymentAuthorized = deploymentExposedSettingsNamespaces.has(ns)
+      && settings.isExposedToClients(branded)
+    if ((!exposedNamespaces().has(ns) && !deploymentAuthorized) || descriptor === undefined) {
+      return notExposed(request, ns)
+    }
     try {
       if (mode === 'update') await settings.update(branded, section, expectedRevision)
       else if (mode === 'replace') await settings.replace(branded, section, expectedRevision)
@@ -2014,13 +2019,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     } catch (error: unknown) {
       return rejected(error)
     }
-    const descriptor = settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === branded)
-    if (descriptor === undefined) {
-      // The write committed but the namespace vanished before this read: only
-      // a concurrent registrant disposal can produce it.
-      return err(request, { code: 'internal', message: `settings namespace "${ns}" was disposed after the ${mode}`, details: {} })
-    }
-    return ok(request, namespaceView(descriptor))
+    const updatedDescriptor = settings.describeForWire().find(candidate => candidate.ns === branded)
+    const updatedDeploymentAuthorized = deploymentExposedSettingsNamespaces.has(ns)
+      && settings.isExposedToClients(branded)
+    if (updatedDescriptor === undefined
+      || (!exposedNamespaces().has(ns) && !updatedDeploymentAuthorized)) return notExposed(request, ns)
+    return ok(request, namespaceView(updatedDescriptor))
   }
 
   return {
@@ -3265,8 +3269,12 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return Promise.resolve(ok(request, {
           writable: settings.writable,
           hasDocument: settings.documentPath !== undefined,
-          namespaces: settings.describe({ redactSecrets: true })
-            .filter(descriptor => exposed.has(String(descriptor.ns)))
+          namespaces: settings.describeForWire()
+            .filter((descriptor) => {
+              const ns = String(descriptor.ns)
+              return exposed.has(ns)
+                || (deploymentExposedSettingsNamespaces.has(ns) && settings.isExposedToClients(descriptor.ns))
+            })
             .map(namespaceView),
         }))
       },

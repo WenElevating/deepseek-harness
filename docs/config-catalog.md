@@ -748,10 +748,17 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * External settings namespaces this deployment may serve after each owning
+   * plugin registers with `exposeToClients: true`. Entries need not be mounted
+   * at startup; duplicate values are removed and malformed names reject load.
+   * @default []
+   */
+  exposedSettingsNamespaces?: string[]
 }
 ```
 
-Source: [`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+Source: [`packages/host/apiproxy/src/index.ts:42`](../packages/host/apiproxy/src/index.ts)
 
 <a id="deepseek-aidsh-host-connection-electron"></a>
 

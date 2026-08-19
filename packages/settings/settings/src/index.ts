@@ -8,7 +8,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import type z from '@deepseek-ai/schemastery'
-import { redactSecrets } from './redact.ts'
+import { redactSchemaForWire, redactSecrets } from './redact.ts'
 import type { RedactedSecret } from './redact.ts'
 import type { SettingsNamespace, SettingsUpdateSource } from './types.ts'
 
@@ -39,6 +39,8 @@ export interface SettingsRegisterOptions<T> {
   base?: Partial<T>
   /** Owner's effect timing, surfaced to configuration UIs; defaults to `live`. */
   applies?: SettingsApplies
+  /** Permit a deployment to serve this namespace to configuration clients; defaults to false. */
+  exposeToClients?: boolean
   /**
    * Reject a resolved section the owner could not act on, for constraints its
    * schema cannot express — a cross-field requirement, or one field's validity
@@ -85,7 +87,7 @@ export interface SettingsDescriptor {
   user?: unknown
   /** Owner's declared effect timing. */
   applies: SettingsApplies
-  /** Schema-declared secret positions; present only under `redactSecrets`. */
+  /** Schema-declared secret positions; present in redacted descriptors. */
   secrets?: RedactedSecret[]
 }
 
@@ -93,8 +95,9 @@ export interface SettingsDescriptor {
 export interface SettingsDescribeOptions {
   /**
    * Strip `role('secret')` fields from `value`/`base`/`user` and enumerate
-   * them in each descriptor's `secrets`. Every wire surface MUST pass this;
-   * the verbatim default exists for same-process configuration UIs only.
+   * them in each descriptor's `secrets`. Browser-facing code MUST use
+   * {@link SettingsProvider.describeForWire}; this option serves same-process
+   * callers that already control the schema they render.
    */
   redactSecrets?: boolean
 }
@@ -326,6 +329,8 @@ interface SettingsRegistration {
   schema: z<unknown>
   base: unknown
   applies: SettingsApplies
+  /** Whether the registrant permits deployment-configured client exposure. */
+  exposeToClients: boolean
   /** Owner-supplied check for constraints the schema cannot express. */
   validate?: (value: unknown) => void
   resolved: unknown
@@ -429,7 +434,7 @@ export abstract class SettingsProvider extends Service {
    * registration itself — the earliest point where the schema can judge it.
    * @param ns - unique namespace; duplicate registration fails loud.
    * @param schema - schemastery schema resolving this namespace's value.
-   * @param options - composition `base` layer and effect timing.
+   * @param options - composition layer, effect timing, and client-exposure opt-in.
    * @returns the owner scope for reads, observation, and updates.
    */
   register<T>(ns: SettingsNamespace, schema: z<T>, options?: SettingsRegisterOptions<T>): SettingsScope<T> {
@@ -441,6 +446,7 @@ export abstract class SettingsProvider extends Service {
       schema: schema as z<unknown>,
       base: options?.base,
       applies: options?.applies ?? 'live',
+      exposeToClients: options?.exposeToClients === true,
       ...options?.validate === undefined
         ? {}
         : { validate: options.validate as (value: unknown) => void },
@@ -473,42 +479,78 @@ export abstract class SettingsProvider extends Service {
    * Describe every registered namespace for configuration surfaces, including
    * the composition `base` and raw user layers so a form can mark which fields
    * the user overrode (presence in `user`) and what a reset returns to.
-   * @param options - redaction switch; wire surfaces must redact.
+   * @param options - optional secret redaction for same-process callers.
    * @returns one descriptor per registered namespace, in registration order.
    */
   describe(options?: SettingsDescribeOptions): SettingsDescriptor[] {
-    return [...this.registrations.values()].map((registration) => {
-      let user: Record<string, unknown> | undefined
+    return [...this.registrations.values()]
+      .map(registration => this.describeRegistration(registration, options?.redactSecrets === true))
+  }
+
+  /**
+   * Whether a live registrant explicitly permits deployment-configured client
+   * exposure. An absent namespace, including one whose fiber unloaded, is not
+   * exposed.
+   * @param ns - registered namespace to inspect.
+   * @returns whether the live registrant opted into client exposure.
+   */
+  isExposedToClients(ns: SettingsNamespace): boolean {
+    return this.registrations.get(ns)?.exposeToClients === true
+  }
+
+  /**
+   * Describe only namespaces whose schema and values can safely reach a
+   * browser. Every returned value layer is secret-redacted and every secret
+   * schema default is removed; an unprovable schema is omitted completely.
+   * @returns safe descriptors in registration order.
+   */
+  describeForWire(): SettingsDescriptor[] {
+    return [...this.registrations.values()].flatMap((registration) => {
       try {
-        user = this.section(registration.ns)
+        const safeSchema = redactSchemaForWire(registration.schema)
+        if (safeSchema === undefined) return []
+        const descriptor = this.describeRegistration(registration, true)
+        const wireDescriptor = { ...descriptor, schema: safeSchema.schema }
+        JSON.stringify(wireDescriptor)
+        return [wireDescriptor]
       } catch {
-        // A malformed stored section already warned at publish and kept the
-        // last good resolved value; only that malformed shape can throw here,
-        // and describing it as "no user layer" keeps this read total.
-        user = undefined
-      }
-      const base = registration.base === undefined ? undefined : structuredClone(registration.base)
-      const detachedUser = user === undefined ? undefined : structuredClone(user)
-      const descriptor: SettingsDescriptor = {
-        ns: registration.ns,
-        schema: registration.schema.toJSON(),
-        value: registration.resolved,
-        revision: registration.revision,
-        ...base === undefined ? {} : { base },
-        ...detachedUser === undefined ? {} : { user: detachedUser },
-        applies: registration.applies,
-      }
-      if (options?.redactSecrets !== true) return descriptor
-      const schema = registration.schema as z<never>
-      const redacted = redactSecrets(schema, registration.resolved)
-      return {
-        ...descriptor,
-        value: redacted.value,
-        ...base === undefined ? {} : { base: redactSecrets(schema, base).value },
-        ...detachedUser === undefined ? {} : { user: redactSecrets(schema, detachedUser).value },
-        secrets: redacted.secrets,
+        return []
       }
     })
+  }
+
+  /** Build one descriptor while preserving the same malformed-section behavior as {@link describe}. */
+  private describeRegistration(registration: SettingsRegistration, redact: boolean): SettingsDescriptor {
+    let user: Record<string, unknown> | undefined
+    try {
+      user = this.section(registration.ns)
+    } catch {
+      // A malformed stored section already warned at publish and kept the
+      // last good resolved value; only that malformed shape can throw here,
+      // and describing it as "no user layer" keeps this read total.
+      user = undefined
+    }
+    const base = registration.base === undefined ? undefined : structuredClone(registration.base)
+    const detachedUser = user === undefined ? undefined : structuredClone(user)
+    const descriptor: SettingsDescriptor = {
+      ns: registration.ns,
+      schema: registration.schema.toJSON(),
+      value: registration.resolved,
+      revision: registration.revision,
+      ...base === undefined ? {} : { base },
+      ...detachedUser === undefined ? {} : { user: detachedUser },
+      applies: registration.applies,
+    }
+    if (!redact) return descriptor
+    const schema = registration.schema as z<never>
+    const redacted = redactSecrets(schema, registration.resolved)
+    return {
+      ...descriptor,
+      value: redacted.value,
+      ...base === undefined ? {} : { base: redactSecrets(schema, base).value },
+      ...detachedUser === undefined ? {} : { user: redactSecrets(schema, detachedUser).value },
+      secrets: redacted.secrets,
+    }
   }
 
   /**
