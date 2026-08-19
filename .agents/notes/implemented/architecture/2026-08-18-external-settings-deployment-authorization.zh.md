@@ -14,7 +14,7 @@ Status: implemented
 
 外部 namespace 只有在已注册、属主 opt-in、部署已列出，且 `ctx.settings.describeForWire()` 返回 descriptor 时才能到达浏览器。现有产品 namespace 规则与 LLM 可配置提供方目录独立于此额外列表。每一种被拒绝的外部读写都回答 `settings-not-exposed`，包括未注册名称，因此 API gateway 不会提供注册表探测。
 
-`describeForWire()` 是浏览器 descriptor 路径。它脱敏全部值层，从 secret schema 节点移除默认值，并在 schema 无法证明每个 secret 都有受支持的结构化脱敏路径时省略 namespace。`redactSecrets()` 仍是通用值辅助函数，不足以授权浏览器响应。网关在每次外部写入前获取安全 descriptor，并在返回结果前再次获取，因此不安全 schema 既不能读取，也不接受浏览器写入。
+`describeForWire()` 是浏览器 descriptor 路径。它脱敏全部值层，从 secret schema 节点移除默认值，并在 schema 无法证明每个 secret 都有受支持的结构化脱敏路径时省略 namespace。对于 lazy schema，它不会执行 builder，而是直接拒绝，因为证明安全时无法从可检查图取得其目标。`redactSecrets()` 仍是通用值辅助函数，不足以授权浏览器响应。网关在每次外部写入前获取安全 descriptor，并在返回结果前再次获取，因此不安全 schema 既不能读取，也不接受浏览器写入。
 
 协议 schema envelope 还必须可被 JSON 序列化；环引用和其他 fetch 载体无法编码的值都会 fail-closed 地被省略。
 

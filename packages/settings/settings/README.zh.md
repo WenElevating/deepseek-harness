@@ -54,5 +54,5 @@
 ## 已知限制与暂缓事项
 
 - **单一用户层** — 解析只认识 schema 默认值、一个组合 `base` 与一个用户文档；它尚未记录每个解析值由哪一层提供。
-- **协议 schema 比本地 schema 更窄**：只有完整可检查图中没有 secret 角色时，`describeForWire()` 才允许不受支持的节点类型。union、intersection、transform 或其他结构一旦抵达 `role('secret')`，整个 namespace 就被省略，不会只给出部分描述，网关也会拒绝其浏览器写入。把可在浏览器编辑的 secret 放在受支持的 `object`/`dict`/`array` 路径中，或暴露一个不含 secret 的引用。
+- **协议 schema 比本地 schema 更窄**：只有完整可检查图中没有 secret 角色时，`describeForWire()` 才允许不受支持的节点类型。union、intersection、transform、lazy schema 或其他结构一旦抵达 `role('secret')`，整个 namespace 就被省略，不会只给出部分描述；安全证明不会执行 lazy builder。网关也会拒绝被省略 namespace 的浏览器写入。把可在浏览器编辑的 secret 放在受支持的 `object`/`dict`/`array` 路径中，或暴露一个不含 secret 的引用。
 - **跨进程并发由提供方定义** — seam 仅在进程内按 namespace 串行化写入；跨进程并发按提供方行为收敛（本地文件提供方在写锁下读-改-写，因此 namespace 在并发写入者下不会丢失，同 namespace 冲突按后写胜出解决）。

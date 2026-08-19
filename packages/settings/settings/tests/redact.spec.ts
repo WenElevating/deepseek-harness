@@ -198,6 +198,19 @@ describe('describe() layers and redaction', () => {
     expect(JSON.stringify(wire)).not.toContain('transform-secret')
   })
 
+  it('fails closed for lazy schemas whose secret fields are hidden behind the builder', async () => {
+    const ctx = await boot({
+      'lazy-secret': { apiKey: 'lazy-stored-secret' },
+    })
+    const LazySecret = z.lazy(() => z.object({
+      apiKey: z.string().role('secret'),
+    }))
+    expect(redactSchemaForWire(LazySecret as z<unknown>)).toBeUndefined()
+    ctx.settings.register(settingsNamespace('lazy-secret'), LazySecret)
+
+    expect(ctx.settings.describeForWire()).toEqual([])
+  })
+
   it('accepts secret-free incomplete schema graphs but rejects cyclic wire envelopes', () => {
     const schema = (node: object, envelope: object): z<unknown> => ({
       ...node,

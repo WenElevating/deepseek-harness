@@ -129,7 +129,9 @@ function containsSecretRole(value: unknown, seen = new Set<object>()): boolean {
 /**
  * Prove that the structural redactor covers every declared secret. Unknown
  * schema node kinds remain usable only when their complete inspectable graph
- * contains no secret role at all; otherwise their value never reaches a wire.
+ * contains no secret role at all; lazy nodes are rejected because their
+ * builder-backed target cannot be inspected without executing the builder.
+ * Otherwise their value never reaches a wire.
  */
 function canRedactForWire(node: SchemaNode): boolean {
   if (node.meta?.role === 'secret') return true
@@ -141,6 +143,11 @@ function canRedactForWire(node: SchemaNode): boolean {
     case 'dict':
     case 'array':
       return node.inner === undefined ? !containsSecretRole(node) : canRedactForWire(node.inner)
+    case 'lazy':
+      // The builder-backed target is not available in the structural graph
+      // until validation or serialization runs it. Reject it rather than
+      // executing arbitrary builders or trusting the opaque lazy node.
+      return false
     default:
       return !containsSecretRole(node)
   }

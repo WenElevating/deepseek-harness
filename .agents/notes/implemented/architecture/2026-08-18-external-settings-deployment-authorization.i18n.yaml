@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-18-external-settings-deployment-authorization.md
-2026-08-18-external-settings-deployment-authorization.md: 4751e5ba5e5521c6e8a740ebc3d679c24f502cbc
-2026-08-18-external-settings-deployment-authorization.zh.md: eab748cb55430ae254bb482e2b12561452086fc9
+2026-08-18-external-settings-deployment-authorization.md: 82c8b88b46453e7049423d12301a59c00bee8eb1
+2026-08-18-external-settings-deployment-authorization.zh.md: 0285b5511aeb6c21e22e24825cb1284986ca800b
